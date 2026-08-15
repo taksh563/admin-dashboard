@@ -5,28 +5,59 @@ export const protect = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
-    if (!authHeader?.startsWith("Bearer ")) {
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({
-        message: "Not authorized",
+        success: false,
+        message: "Authentication required",
       });
     }
 
     const token = authHeader.split(" ")[1];
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    req.user = await User.findById(decoded.id).select("-password");
-
-    if (!req.user) {
+    if (!token) {
       return res.status(401).json({
-        message: "User not found",
+        success: false,
+        message: "Authentication token missing",
       });
     }
 
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET
+    );
+
+    const user = await User.findById(decoded.id).select(
+      "-password"
+    );
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "User no longer exists",
+      });
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account has been disabled",
+      });
+    }
+
+    req.user = user;
+
     next();
   } catch (error) {
+    if (error.name === "TokenExpiredError") {
+      return res.status(401).json({
+        success: false,
+        message: "Token expired",
+      });
+    }
+
     return res.status(401).json({
-      message: "Invalid token",
+      success: false,
+      message: "Invalid authentication token",
     });
   }
 };
