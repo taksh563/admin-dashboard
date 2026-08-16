@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
+
 import {
   LockKeyhole,
   Mail,
@@ -15,8 +16,16 @@ import {
 
 const Login = () => {
   const navigate = useNavigate();
-  const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(true);
+
+  const [showPassword, setShowPassword] =
+    useState(false);
+
+  const [rememberMe, setRememberMe] =
+    useState(true);
+
+  const [loading, setLoading] =
+    useState(false);
+
   const {
     success,
     error: showError,
@@ -29,192 +38,326 @@ const Login = () => {
     password: "",
   });
 
+  // =====================================================
+  // SHOW SESSION EXPIRED MESSAGE
+  // =====================================================
+
+  useEffect(() => {
+    const sessionMessage =
+      sessionStorage.getItem(
+        "sessionMessage"
+      );
+
+    if (sessionMessage) {
+      showError(sessionMessage);
+
+      sessionStorage.removeItem(
+        "sessionMessage"
+      );
+    }
+  }, [showError]);
+
+  // =====================================================
+  // INPUT CHANGE
+  // =====================================================
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+
+    setForm((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  // =====================================================
+  // LOGIN
+  // =====================================================
+
   const submit = async (e) => {
-  e.preventDefault();
-
-  try {
-    await login(form.email, form.password);
-
-    success("Login successfully.");
-    navigate("/dashboard");
-  } catch (error) {
-    showError(
-      error.response?.data?.message ||
-      "Invalid email or password."
-    );
-  }
-};
-
-
-
-  const handleSubmit = (e) => {
     e.preventDefault();
 
-    // console.log("Login data:", formData);
+    if (loading) {
+      return;
+    }
 
-    // Later connect your API here
-    // axios.post("http://localhost:5000/api/auth/login", formData)
+    setLoading(true);
+
+    try {
+      await login(
+        form.email.trim(),
+        form.password
+      );
+
+      success("Login successful.");
+
+      navigate("/dashboard");
+    } catch (error) {
+      console.error(
+        "Login error:",
+        error
+      );
+
+      // -----------------------------------------------
+      // Get backend error information
+      // -----------------------------------------------
+
+      const code =
+        error.response?.data?.code;
+
+      const message =
+        error.response?.data?.message;
+
+      // -----------------------------------------------
+      // EMAIL NOT FOUND
+      // -----------------------------------------------
+
+      if (code === "EMAIL_NOT_FOUND") {
+        showError(
+          "Email address does not exist."
+        );
+
+        setLoading(false);
+        return;
+      }
+
+      // -----------------------------------------------
+      // WRONG PASSWORD
+      // -----------------------------------------------
+
+      if (code === "INVALID_PASSWORD") {
+        showError(
+          "Incorrect password."
+        );
+
+        setLoading(false);
+        return;
+      }
+
+      // -----------------------------------------------
+      // ACCOUNT INACTIVE
+      // -----------------------------------------------
+
+      if (
+        code === "ACCOUNT_INACTIVE"
+      ) {
+        showError(
+          message ||
+            "Your account is inactive. Please contact the administrator."
+        );
+
+        setLoading(false);
+        return;
+      }
+
+      // -----------------------------------------------
+      // INVALID TOKEN
+      // -----------------------------------------------
+
+      if (code === "INVALID_TOKEN") {
+        showError(
+          "Your session is invalid. Please login again."
+        );
+
+        setLoading(false);
+        return;
+      }
+
+      // -----------------------------------------------
+      // TOKEN EXPIRED
+      // -----------------------------------------------
+
+      if (code === "TOKEN_EXPIRED") {
+        showError(
+          "Your session has expired. Please login again."
+        );
+
+        setLoading(false);
+        return;
+      }
+
+      // -----------------------------------------------
+      // GENERIC ERROR
+      // -----------------------------------------------
+
+      showError(
+        message ||
+          "Unable to login. Please try again."
+      );
+
+      setLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen w-full bg-slate-100">
-      <div className="min-h-screen w-full flex">
-        {/* ============================================
+      <div className="flex min-h-screen w-full">
+
+        {/* =================================================
             LEFT SIDE
-        ============================================ */}
+        ================================================= */}
+
         <div
-          className="hidden lg:flex lg:w-1/2 min-h-screen relative bg-cover bg-center"
+          className="relative hidden min-h-screen bg-cover bg-center lg:flex lg:w-1/2"
           style={{
-            backgroundImage: "url('/login-bg.jpg')",
+            backgroundImage:
+              "url('/login-bg.jpg')",
           }}
         >
-          {/* Dark blue overlay */}
+          {/* Overlay */}
+
           <div className="absolute inset-0 bg-gradient-to-br from-blue-950/95 via-blue-900/90 to-blue-700/75" />
 
-          {/* Left content */}
-          <div className="relative z-10 flex flex-col  w-full p-12 text-white">
+          {/* Content */}
+
+          <div className="relative z-10 flex w-full flex-col p-12 text-white">
 
             {/* Logo */}
+
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-xl bg-blue-500 flex items-center justify-center shadow-lg">
+
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-500 shadow-lg">
                 <LockKeyhole size={24} />
               </div>
 
               <div className="text-2xl font-bold tracking-tight">
-                Admin<span className="text-blue-400">Panel</span>
+                Admin
+                <span className="text-blue-400">
+                  Panel
+                </span>
               </div>
+
             </div>
 
             {/* Welcome */}
-            <div className="max-w-md">
-              {/* 
-              <h1 className="text-5xl font-bold leading-tight">
-                Welcome Back!
-              </h1> */}
 
-              <div className="mt-5 h-1 w-14 bg-blue-500 rounded-full" />
+            <div className="mt-5 max-w-md">
 
-              <p className="mt-6 text-lg text-blue-100 leading-relaxed">
-                Sign in to continue to your admin dashboard and manage
+              <div className="h-1 w-14 rounded-full bg-blue-500" />
+
+              <p className="mt-6 text-lg leading-relaxed text-blue-100">
+                Sign in to continue to your
+                admin dashboard and manage
                 your application with ease.
               </p>
 
               {/* Features */}
+
               <div className="mt-10 space-y-7">
 
                 {/* Analytics */}
+
                 <div className="flex items-center gap-5">
-                  <div className="w-12 h-12 rounded-xl bg-white/10 backdrop-blur-sm flex items-center justify-center">
-                    <BarChart3 className="text-blue-400" size={24} />
+
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/10 backdrop-blur-sm">
+                    <BarChart3
+                      className="text-blue-400"
+                      size={24}
+                    />
                   </div>
 
                   <div>
-                    <h3 className="font-semibold text-lg">
+                    <h3 className="text-lg font-semibold">
                       Analytics Overview
                     </h3>
 
-                    <p className="text-sm text-blue-200 mt-1">
+                    <p className="mt-1 text-sm text-blue-200">
                       View real-time performance
                     </p>
                   </div>
+
                 </div>
 
                 {/* Users */}
+
                 <div className="flex items-center gap-5">
-                  <div className="w-12 h-12 rounded-xl bg-white/10 backdrop-blur-sm flex items-center justify-center">
-                    <Users className="text-blue-400" size={24} />
+
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/10 backdrop-blur-sm">
+                    <Users
+                      className="text-blue-400"
+                      size={24}
+                    />
                   </div>
 
                   <div>
-                    <h3 className="font-semibold text-lg">
+                    <h3 className="text-lg font-semibold">
                       User Management
                     </h3>
 
-                    <p className="text-sm text-blue-200 mt-1">
+                    <p className="mt-1 text-sm text-blue-200">
                       Manage users and roles
                     </p>
                   </div>
+
                 </div>
 
                 {/* Security */}
+
                 <div className="flex items-center gap-5">
-                  <div className="w-12 h-12 rounded-xl bg-white/10 backdrop-blur-sm flex items-center justify-center">
-                    <ShieldCheck className="text-blue-400" size={24} />
+
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/10 backdrop-blur-sm">
+                    <ShieldCheck
+                      className="text-blue-400"
+                      size={24}
+                    />
                   </div>
 
                   <div>
-                    <h3 className="font-semibold text-lg">
+                    <h3 className="text-lg font-semibold">
                       Secure & Reliable
                     </h3>
 
-                    <p className="text-sm text-blue-200 mt-1">
+                    <p className="mt-1 text-sm text-blue-200">
                       Enterprise-grade security
                     </p>
                   </div>
+
                 </div>
 
               </div>
             </div>
-
-
-
           </div>
         </div>
 
-        {/* ============================================
+        {/* =================================================
             RIGHT SIDE
-        ============================================ */}
-        <div
-          className="w-full lg:w-1/2 min-h-screen flex items-center justify-center bg-white px-6 py-10"
+        ================================================= */}
 
-        >
+        <div className="flex min-h-screen w-full items-center justify-center bg-white px-6 py-10 lg:w-1/2">
 
           <div className="w-full max-w-lg">
 
             {/* Login Card */}
-            <div
-            // className="bg-white rounded-2xl border border-slate-200 shadow-xl p-8 sm:p-10"
-            >
+
+            <div>
 
               {/* Lock Icon */}
-              <div className="flex justify-center mb-6">
-                <div className="w-20 h-20 rounded-full bg-blue-50 flex items-center justify-center">
+
+              <div className="mb-6 flex justify-center">
+
+                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-blue-50">
+
                   <LockKeyhole
                     size={34}
                     className="text-blue-600"
                   />
+
                 </div>
+
               </div>
 
-              {/* Heading */}
-              {/* <div className="text-center">
-
-                <h2 className="text-3xl font-bold text-slate-900">
-                  Admin Login
-                </h2>
-
-                <p className="mt-3 text-slate-500 leading-relaxed">
-                  Please enter your credentials to access
-                  <br className="hidden sm:block" />
-                  the admin dashboard
-                </p>
-
-              </div> */}
-
               {/* Form */}
+
               <form
                 onSubmit={submit}
                 className="mt-8 space-y-6"
               >
 
-                {/* Email */}
+                {/* =================================================
+                    EMAIL
+                ================================================= */}
+
                 <div>
-                  {/* <label
-                    htmlFor="email"
-                    className="block text-sm font-semibold text-slate-700 mb-2"
-                  >
-                    Email Address
-                  </label> */}
 
                   <div className="relative">
 
@@ -228,43 +371,39 @@ const Login = () => {
                       name="email"
                       type="email"
                       value={form.email}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          email: e.target.value,
-                        })
-                      }
+                      onChange={handleChange}
                       placeholder="Enter your email"
                       autoComplete="email"
                       required
+                      disabled={loading}
                       className="
-                        w-full
                         h-14
-                        pl-12
-                        pr-4
+                        w-full
                         rounded-lg
                         border
                         border-slate-300
+                        pl-12
+                        pr-4
                         text-slate-800
                         outline-none
                         transition
                         focus:border-blue-500
                         focus:ring-4
                         focus:ring-blue-500/10
+                        disabled:cursor-not-allowed
+                        disabled:bg-slate-100
                       "
                     />
 
                   </div>
+
                 </div>
 
-                {/* Password */}
+                {/* =================================================
+                    PASSWORD
+                ================================================= */}
+
                 <div>
-                  {/* <label
-                    htmlFor="password"
-                    className="block text-sm font-semibold text-slate-700 mb-2"
-                  >
-                    Password
-                  </label> */}
 
                   <div className="relative">
 
@@ -276,38 +415,43 @@ const Login = () => {
                     <input
                       id="password"
                       name="password"
-                      type={showPassword ? "text" : "password"}
-                      value={form.password}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          password: e.target.value,
-                        })
+                      type={
+                        showPassword
+                          ? "text"
+                          : "password"
                       }
+                      value={form.password}
+                      onChange={handleChange}
                       placeholder="Enter your password"
                       autoComplete="current-password"
                       required
+                      disabled={loading}
                       className="
-                        w-full
                         h-14
-                        pl-12
-                        pr-12
+                        w-full
                         rounded-lg
                         border
                         border-slate-300
+                        pl-12
+                        pr-12
                         text-slate-800
                         outline-none
                         transition
                         focus:border-blue-500
                         focus:ring-4
                         focus:ring-blue-500/10
+                        disabled:cursor-not-allowed
+                        disabled:bg-slate-100
                       "
                     />
 
                     <button
                       type="button"
+                      disabled={loading}
                       onClick={() =>
-                        setShowPassword(!showPassword)
+                        setShowPassword(
+                          (prev) => !prev
+                        )
                       }
                       className="
                         absolute
@@ -315,8 +459,9 @@ const Login = () => {
                         top-1/2
                         -translate-y-1/2
                         text-slate-400
-                        hover:text-slate-700
                         transition
+                        hover:text-slate-700
+                        disabled:cursor-not-allowed
                       "
                     >
                       {showPassword ? (
@@ -327,30 +472,38 @@ const Login = () => {
                     </button>
 
                   </div>
+
                 </div>
 
-                {/* Remember / Forgot */}
+                {/* =================================================
+                    REMEMBER / FORGOT
+                ================================================= */}
+
                 <div className="flex items-center justify-between">
 
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <label className="flex cursor-pointer items-center gap-2">
 
                     <button
                       type="button"
+                      disabled={loading}
                       onClick={() =>
-                        setRememberMe(!rememberMe)
+                        setRememberMe(
+                          (prev) => !prev
+                        )
                       }
                       className={`
-                        w-5
-                        h-5
-                        rounded
-                        border
                         flex
+                        h-5
+                        w-5
                         items-center
                         justify-center
+                        rounded
+                        border
                         transition
-                        ${rememberMe
-                          ? "bg-blue-600 border-blue-600"
-                          : "border-slate-300"
+                        ${
+                          rememberMe
+                            ? "border-blue-600 bg-blue-600"
+                            : "border-slate-300"
                         }
                       `}
                     >
@@ -370,6 +523,7 @@ const Login = () => {
 
                   <button
                     type="button"
+                    disabled={loading}
                     className="text-sm font-medium text-blue-600 hover:text-blue-700"
                   >
                     Forgot password?
@@ -377,78 +531,70 @@ const Login = () => {
 
                 </div>
 
-                {/* Login Button */}
+                {/* =================================================
+                    LOGIN BUTTON
+                ================================================= */}
+
                 <button
                   type="submit"
+                  disabled={loading}
                   className="
-                    w-full
+                    flex
                     h-14
+                    w-full
+                    items-center
+                    justify-center
                     rounded-lg
                     bg-blue-600
-                    hover:bg-blue-700
-                    active:bg-blue-800
-                    text-white
-                    font-semibold
                     text-base
+                    font-semibold
+                    text-white
                     shadow-lg
                     shadow-blue-600/20
                     transition
                     duration-200
+                    hover:bg-blue-700
+                    active:bg-blue-800
+                    disabled:cursor-not-allowed
+                    disabled:opacity-70
                   "
                 >
-                  Login
+                  {loading ? (
+                    <>
+                      <svg
+                        className="mr-3 h-5 w-5 animate-spin"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                      >
+                        <circle
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                          className="opacity-25"
+                        />
+
+                        <path
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                          className="opacity-75"
+                        />
+                      </svg>
+
+                      Signing in...
+                    </>
+                  ) : (
+                    "Login"
+                  )}
                 </button>
 
-                {/* Divider */}
-                {/* <div className="flex items-center gap-4">
-
-                  <div className="flex-1 h-px bg-slate-200" />
-
-                  <span className="text-sm text-slate-400">
-                    or continue with
-                  </span>
-
-                  <div className="flex-1 h-px bg-slate-200" />
-
-                </div> */}
-
-                {/* Google */}
-                {/* <button
-                  type="button"
-                  className="
-                    w-full
-                    h-14
-                    rounded-lg
-                    border
-                    border-slate-300
-                    hover:bg-slate-50
-                    text-slate-700
-                    font-medium
-                    flex
-                    items-center
-                    justify-center
-                    gap-3
-                    transition
-                  "
-                >
-                  <span className="text-lg font-bold">
-                    G
-                  </span>
-
-                  Login with Google
-                </button> */}
-
               </form>
-            </div>
 
-            {/* Copyright */}
-            {/* <p className="text-center text-sm text-slate-400 mt-8">
-              © 2026 AdminPanel. All rights reserved.
-            </p> */}
+            </div>
 
           </div>
         </div>
-
       </div>
     </div>
   );

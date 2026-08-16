@@ -1,7 +1,6 @@
 import bcrypt from "bcrypt";
 import User from "../models/user.model.js";
-import { createAuditLog } from "../utils/auditLogger.js";
-import emailServices from "../services/email.service.js"
+import {createAuditLog,} from "../utils/auditLogger.js";
 
 /**
  * GET /api/users
@@ -146,8 +145,10 @@ export const createUser = async (req, res) => {
       });
     }
 
-    const hashedPassword =
-      await bcrypt.hash(password, 12);
+    const hashedPassword = await bcrypt.hash(
+      password,
+      12
+    );
 
     const user = await User.create({
       name,
@@ -157,100 +158,9 @@ export const createUser = async (req, res) => {
       isActive: true,
     });
 
-    // -----------------------------------------
-    // AUDIT LOG - CREATE USER
-    // -----------------------------------------
-
-    await createAuditLog({
-      req,
-
-      action: "CREATE",
-
-      module: "USER",
-
-      description:
-        `Created user "${user.name}"`,
-
-      recordId: user._id,
-
-      newData: {
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        isActive: user.isActive,
-      },
-    });
-
-    // =========================================
-    // 7. SEND WELCOME EMAIL
-    // =========================================
-
-    try {
-      await emailService.sendEmail({
-        to: user.email,
-
-        subject:
-          "Welcome to Admin Dashboard",
-
-        text:
-          `Hello ${user.name}, your account has been created.`,
-
-        html: `
-          <div style="
-            font-family: Arial, sans-serif;
-            max-width: 600px;
-            margin: auto;
-            padding: 30px;
-            color: #334155;
-          ">
-
-            <h2 style="
-              color: #2563eb;
-            ">
-              Welcome ${user.name}
-            </h2>
-
-            <p>
-              Your account has been
-              successfully created.
-            </p>
-
-            <p>
-              You can now log in to the
-              Admin Dashboard using your
-              registered email address.
-            </p>
-
-            <p>
-              Regards,<br>
-              <strong>Admin Team</strong>
-            </p>
-
-          </div>
-        `,
-      });
-
-      console.log(
-        `Welcome email sent to ${user.email}`
-      );
-
-    } catch (emailError) {
-
-      // Don't fail user creation
-      // if email fails.
-
-      console.error(
-        "Welcome email failed:",
-        emailError.message
-      );
-    }
-
-    // send email
-
     res.status(201).json({
       success: true,
       message: "User created successfully",
-
       data: {
         id: user._id,
         name: user.name,
@@ -259,12 +169,14 @@ export const createUser = async (req, res) => {
         isActive: user.isActive,
         createdAt: user.createdAt,
       },
+      
     });
+    
+    await createAuditLog({req,action: "CREATE",module: "USER",description:`Created user "${user.name}"`, recordId: user._id,
+  newData: {name: user.name,email: user.email,role: user.role,isActive: user.isActive,},});
+  
   } catch (error) {
-    console.error(
-      "Create user error:",
-      error
-    );
+    console.error("Create user error:", error);
 
     res.status(500).json({
       success: false,
@@ -290,19 +202,7 @@ export const updateUser = async (req, res) => {
       });
     }
 
-    // -----------------------------------------
-    // Capture OLD data before modification
-    // -----------------------------------------
-
-    const oldData = {
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      isActive: user.isActive,
-    };
-
     const name = req.body.name?.trim();
-
     const email = req.body.email
       ?.trim()
       .toLowerCase();
@@ -313,23 +213,18 @@ export const updateUser = async (req, res) => {
       user.name = name;
     }
 
-    if (
-      email &&
-      email !== user.email
-    ) {
-      const existingUser =
-        await User.findOne({
-          email,
-          _id: {
-            $ne: user._id,
-          },
-        });
+    if (email && email !== user.email) {
+      const existingUser = await User.findOne({
+        email,
+        _id: {
+          $ne: user._id,
+        },
+      });
 
       if (existingUser) {
         return res.status(409).json({
           success: false,
-          message:
-            "Email already exists",
+          message: "Email already exists",
         });
       }
 
@@ -338,11 +233,7 @@ export const updateUser = async (req, res) => {
 
     if (role) {
       if (
-        ![
-          "admin",
-          "manager",
-          "user",
-        ].includes(role)
+        !["admin", "manager", "user"].includes(role)
       ) {
         return res.status(400).json({
           success: false,
@@ -354,9 +245,7 @@ export const updateUser = async (req, res) => {
     }
 
     if (req.body.password) {
-      if (
-        req.body.password.length < 6
-      ) {
+      if (req.body.password.length < 6) {
         return res.status(400).json({
           success: false,
           message:
@@ -364,52 +253,17 @@ export const updateUser = async (req, res) => {
         });
       }
 
-      user.password =
-        await bcrypt.hash(
-          req.body.password,
-          12
-        );
+      user.password = await bcrypt.hash(
+        req.body.password,
+        12
+      );
     }
 
     await user.save();
 
-    // -----------------------------------------
-    // NEW data after modification
-    // -----------------------------------------
-
-    const newData = {
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      isActive: user.isActive,
-    };
-
-    // -----------------------------------------
-    // AUDIT LOG - UPDATE USER
-    // -----------------------------------------
-
-    await createAuditLog({
-      req,
-
-      action: "UPDATE",
-
-      module: "USER",
-
-      description:
-        `Updated user "${user.name}"`,
-
-      recordId: user._id,
-
-      oldData,
-
-      newData,
-    });
-
     res.status(200).json({
       success: true,
-      message:
-        "User updated successfully",
-
+      message: "User updated successfully",
       data: {
         id: user._id,
         name: user.name,
@@ -419,10 +273,7 @@ export const updateUser = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error(
-      "Update user error:",
-      error
-    );
+    console.error("Update user error:", error);
 
     res.status(500).json({
       success: false,
@@ -451,58 +302,13 @@ export const updateUserStatus = async (
       });
     }
 
-    // -----------------------------------------
-    // Capture old status
-    // -----------------------------------------
-
-    const oldStatus =
-      user.isActive;
-
-    const newStatus =
-      Boolean(req.body.isActive);
-
-    user.isActive = newStatus;
+    user.isActive = Boolean(req.body.isActive);
 
     await user.save();
 
-    // -----------------------------------------
-    // AUDIT LOG - STATUS UPDATE
-    // -----------------------------------------
-
-    await createAuditLog({
-      req,
-
-      action: "STATUS_UPDATE",
-
-      module: "USER",
-
-      description:
-        `Changed user "${user.name}" status from ${
-          oldStatus
-            ? "Active"
-            : "Inactive"
-        } to ${
-          newStatus
-            ? "Active"
-            : "Inactive"
-        }`,
-
-      recordId: user._id,
-
-      oldData: {
-        isActive: oldStatus,
-      },
-
-      newData: {
-        isActive: newStatus,
-      },
-    });
-
     res.status(200).json({
       success: true,
-      message:
-        "User status updated",
-
+      message: "User status updated",
       data: {
         id: user._id,
         isActive: user.isActive,
@@ -516,8 +322,7 @@ export const updateUserStatus = async (
 
     res.status(500).json({
       success: false,
-      message:
-        "Unable to update user status",
+      message: "Unable to update user status",
     });
   }
 };
@@ -526,15 +331,9 @@ export const updateUserStatus = async (
 /**
  * DELETE /api/users/:id
  */
-export const deleteUser = async (
-  req,
-  res
-) => {
+export const deleteUser = async (req, res) => {
   try {
-    // -----------------------------------------
     // Prevent admin from deleting themselves
-    // -----------------------------------------
-
     if (
       req.user._id.toString() ===
       req.params.id
@@ -546,14 +345,9 @@ export const deleteUser = async (
       });
     }
 
-    // -----------------------------------------
-    // Get user BEFORE deleting
-    // -----------------------------------------
-
-    const user =
-      await User.findById(
-        req.params.id
-      ).select("-password");
+    const user = await User.findByIdAndDelete(
+      req.params.id
+    );
 
     if (!user) {
       return res.status(404).json({
@@ -562,48 +356,12 @@ export const deleteUser = async (
       });
     }
 
-    // -----------------------------------------
-    // Delete user
-    // -----------------------------------------
-
-    await User.findByIdAndDelete(
-      req.params.id
-    );
-
-    // -----------------------------------------
-    // AUDIT LOG - DELETE USER
-    // -----------------------------------------
-
-    await createAuditLog({
-      req,
-
-      action: "DELETE",
-
-      module: "USER",
-
-      description:
-        `Deleted user "${user.name}"`,
-
-      recordId: user._id,
-
-      oldData: {
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        isActive: user.isActive,
-      },
-    });
-
     res.status(200).json({
       success: true,
-      message:
-        "User deleted successfully",
+      message: "User deleted successfully",
     });
   } catch (error) {
-    console.error(
-      "Delete user error:",
-      error
-    );
+    console.error("Delete user error:", error);
 
     res.status(500).json({
       success: false,

@@ -1,46 +1,88 @@
 import jwt from "jsonwebtoken";
 import User from "../models/user.model.js";
 
-export const protect = async (req, res, next) => {
+export const protect = async (
+  req,
+  res,
+  next
+) => {
   try {
-    const authHeader = req.headers.authorization;
+    const authHeader =
+      req.headers.authorization;
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    if (
+      !authHeader ||
+      !authHeader.startsWith("Bearer ")
+    ) {
       return res.status(401).json({
         success: false,
-        message: "Authentication required",
+        code: "NO_TOKEN",
+        message: "Authentication required.",
       });
     }
 
-    const token = authHeader.split(" ")[1];
+    const token =
+      authHeader.split(" ")[1];
 
-    if (!token) {
+    let decoded;
+
+    try {
+      decoded = jwt.verify(
+        token,
+        process.env.JWT_SECRET
+      );
+    } catch (error) {
+      // ---------------------------------------
+      // JWT expired
+      // ---------------------------------------
+
+      if (error.name === "TokenExpiredError") {
+        return res.status(401).json({
+          success: false,
+          code: "TOKEN_EXPIRED",
+          message: "Your session has expired.",
+        });
+      }
+
+      // ---------------------------------------
+      // Invalid JWT
+      // ---------------------------------------
+
       return res.status(401).json({
         success: false,
-        message: "Authentication token missing",
+        code: "INVALID_TOKEN",
+        message:
+          "Your session is invalid. Please login again.",
       });
     }
 
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET
-    );
+    // -----------------------------------------
+    // Find user
+    // -----------------------------------------
 
-    const user = await User.findById(decoded.id).select(
-      "-password"
-    );
+    const user = await User.findById(
+      decoded.id
+    ).select("-password");
 
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: "User no longer exists",
+        code: "USER_NOT_FOUND",
+        message:
+          "Your account could not be found.",
       });
     }
 
+    // -----------------------------------------
+    // Check account status
+    // -----------------------------------------
+
     if (!user.isActive) {
-      return res.status(403).json({
+      return res.status(401).json({
         success: false,
-        message: "Your account has been disabled",
+        code: "ACCOUNT_INACTIVE",
+        message:
+          "Your account is inactive.",
       });
     }
 
@@ -48,16 +90,15 @@ export const protect = async (req, res, next) => {
 
     next();
   } catch (error) {
-    if (error.name === "TokenExpiredError") {
-      return res.status(401).json({
-        success: false,
-        message: "Token expired",
-      });
-    }
+    console.error(
+      "Auth middleware error:",
+      error
+    );
 
-    return res.status(401).json({
+    return res.status(500).json({
       success: false,
-      message: "Invalid authentication token",
+      message:
+        "Authentication service error.",
     });
   }
 };

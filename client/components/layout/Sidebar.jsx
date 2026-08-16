@@ -6,6 +6,7 @@ import {
   Tags,
   Settings,
   X,
+  Activity
 } from "lucide-react";
 
 const menuItems = [
@@ -29,6 +30,11 @@ const menuItems = [
     path: "/categories",
     icon: Tags,
   },
+  {
+  name: "Activity Logs",
+  path: "/logs",
+  icon: Activity,
+},
   {
     name: "Settings",
     path: "/settings",

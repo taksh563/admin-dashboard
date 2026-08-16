@@ -11,6 +11,7 @@ import ProtectedRoute from "../routes/ProtectedRoute";
 import RoleRoute from "../routes/RoleRoute";
 
 import DashboardLayout from "../layouts/DashboardLayout";
+import Logs from "../pages/Logs/Logs";
 
 function App() {
   return (
@@ -18,6 +19,10 @@ function App() {
       {/* Public */}
       <Route
         path="/"
+        element={<Login />}
+      />
+      <Route
+        path="/login"
         element={<Login />}
       />
 
@@ -44,6 +49,15 @@ function App() {
           element={
             <RoleRoute roles={["admin", "user"]}>
               <Users />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/logs"
+          element={
+            <RoleRoute roles={["admin"]}>
+              <Logs />
             </RoleRoute>
           }
         />

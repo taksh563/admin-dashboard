@@ -1,38 +1,3 @@
-// import axios from "axios";
-
-// const api = axios.create({
-//   baseURL: "http://localhost:5000/api",
-//   headers: {
-//     "Content-Type": "application/json",
-//   },
-// });
-
-// api.interceptors.request.use((config) => {
-//   const token = localStorage.getItem("token");
-
-//   if (token) {
-//     config.headers.Authorization = `Bearer ${token}`;
-//   }
-
-//   return config;
-// });
-
-// api.interceptors.response.use(
-//   (response) => response,
-//   (error) => {
-//     if (error.response?.status === 401) {
-//       localStorage.removeItem("token");
-//       localStorage.removeItem("user");
-
-//       window.location.href = "/";
-//     }
-
-//     return Promise.reject(error);
-//   }
-// );
-
-// export default api;
-
 import axios from "axios";
 
 const api = axios.create({
@@ -44,6 +9,10 @@ const api = axios.create({
     "Content-Type": "application/json",
   },
 });
+
+// =====================================================
+// REQUEST INTERCEPTOR
+// =====================================================
 
 api.interceptors.request.use(
   (config) => {
@@ -57,36 +26,136 @@ api.interceptors.request.use(
 
     return config;
   },
-  (error) => Promise.reject(error)
+
+  (error) => {
+    return Promise.reject(error);
+  }
 );
 
-// api.interceptors.response.use(
-//   (response) => response,
+// =====================================================
+// RESPONSE INTERCEPTOR
+// =====================================================
 
-//   (error) => {
-//     if (error.response?.status === 401) {
-//       localStorage.removeItem("token");
-//       localStorage.removeItem("user");
+api.interceptors.response.use(
+  (response) => {
+    return response;
+  },
 
-//       // window.location.href = "/";
-//     }
-
-//     return Promise.reject(error);
-//   }
-// );
-
-axios.interceptors.response.use(
-  (response) => response,
   (error) => {
+    const status =
+      error.response?.status;
+
+    const code =
+      error.response?.data?.code;
+
+    const requestUrl =
+      error.config?.url || "";
+
+    // -----------------------------------------
+    // Don't handle login 401 here
+    // Login page handles these messages
+    // -----------------------------------------
+
     const isLoginRequest =
-      error.config?.url?.includes("/auth/login");
+      requestUrl.includes(
+        "/auth/login"
+      );
 
     if (
-      error.response?.status === 401 &&
+      status === 401 &&
       !isLoginRequest
     ) {
+      // ---------------------------------------
+      // TOKEN EXPIRED
+      // ---------------------------------------
+
+      if (code === "TOKEN_EXPIRED") {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+
+        // Store message temporarily
+        sessionStorage.setItem(
+          "sessionMessage",
+          "Your session has expired. Please login again."
+        );
+
+        window.location.href =
+          "/login";
+
+        return Promise.reject(error);
+      }
+
+      // ---------------------------------------
+      // INVALID TOKEN
+      // ---------------------------------------
+
+      if (code === "INVALID_TOKEN") {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+
+        sessionStorage.setItem(
+          "sessionMessage",
+          "Your session is invalid. Please login again."
+        );
+
+        window.location.href =
+          "/login";
+
+        return Promise.reject(error);
+      }
+
+      // ---------------------------------------
+      // USER NOT FOUND
+      // ---------------------------------------
+
+      if (code === "USER_NOT_FOUND") {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+
+        sessionStorage.setItem(
+          "sessionMessage",
+          "Your account could not be found. Please login again."
+        );
+
+        window.location.href =
+          "/login";
+
+        return Promise.reject(error);
+      }
+
+      // ---------------------------------------
+      // ACCOUNT INACTIVE
+      // ---------------------------------------
+
+      if (code === "ACCOUNT_INACTIVE") {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+
+        sessionStorage.setItem(
+          "sessionMessage",
+          "Your account is inactive. Please contact the administrator."
+        );
+
+        window.location.href =
+          "/login";
+
+        return Promise.reject(error);
+      }
+
+      // ---------------------------------------
+      // Generic 401
+      // ---------------------------------------
+
       localStorage.removeItem("token");
-      window.location.href = "/login";
+      localStorage.removeItem("user");
+
+      sessionStorage.setItem(
+        "sessionMessage",
+        "Your session has expired. Please login again."
+      );
+
+      window.location.href =
+        "/login";
     }
 
     return Promise.reject(error);
