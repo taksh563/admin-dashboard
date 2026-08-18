@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { X } from "lucide-react";
 
 const initialForm = {
@@ -7,6 +7,7 @@ const initialForm = {
   password: "",
   role: "user",
 };
+import SimpleReactValidator from "simple-react-validator";
 
 export default function UserModal({
   open,
@@ -15,6 +16,10 @@ export default function UserModal({
   user = null,
   loading = false,
 }) {
+   const [, forceUpdate] = useState();
+ const SimpleValidator = useRef(
+    new SimpleReactValidator({ autoForceUpdate: { forceUpdate: forceUpdate } })
+  );
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState("");
 
@@ -50,7 +55,7 @@ export default function UserModal({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
+ if (SimpleValidator.current.allValid()) {
     if (!form.name.trim()) {
       setError("Name is required");
       return;
@@ -95,6 +100,10 @@ export default function UserModal({
       error.message ||
       "Unable to save user"
   );
+    }
+    } else {
+     SimpleValidator.current.showMessages();
+      forceUpdate(1);
     }
   };
 
@@ -151,6 +160,11 @@ export default function UserModal({
               placeholder="Enter full name"
               className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
+            {SimpleValidator.current.message(
+                      "fullname",
+                      form.name,
+                      "required|min:3"
+                    )}
           </div>
 
           {/* Email */}
@@ -167,6 +181,11 @@ export default function UserModal({
               placeholder="Enter email address"
               className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
+             {SimpleValidator.current.message(
+                      "email",
+                      form.email,
+                      "required|email"
+                    )}
           </div>
 
           {/* Password */}
@@ -193,6 +212,11 @@ export default function UserModal({
               autoComplete="new-password"
               className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
+            {SimpleValidator.current.message(
+                      "password",
+                      form.password,
+                      "min:3"
+                    )}
           </div>
 
           {/* Role */}

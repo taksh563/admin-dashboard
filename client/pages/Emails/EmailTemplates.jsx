@@ -1,12 +1,7 @@
-import {
-  useCallback,
-  useEffect,
-  useState,
-} from "react";
-
+import {useCallback,useEffect,useState,useRef} from "react";
 import emailTemplateService from "../../services/emailTemplate.service";
-
 import { useToast } from "../../context/ToastContext";
+import SimpleReactValidator from "simple-react-validator";
 
 export default function EmailTemplates() {
   const {
@@ -17,6 +12,8 @@ export default function EmailTemplates() {
   // =========================================
   // LIST STATE
   // =========================================
+const [, forceUpdate] = useState();
+ const SimpleValidator = useRef(new SimpleReactValidator({ autoForceUpdate: { forceUpdate: forceUpdate } }));
 
   const [templates, setTemplates] =
     useState([]);
@@ -256,11 +253,10 @@ export default function EmailTemplates() {
   // SAVE
   // =========================================
 
-  const handleSubmit = async (
-    e
-  ) => {
-    e.preventDefault();
+  const handleSubmit = async (e) => {
 
+    e.preventDefault();
+ if (SimpleValidator.current.allValid()) {
     if (!formData.name.trim()) {
       error(
         "Template name is required."
@@ -360,6 +356,10 @@ export default function EmailTemplates() {
       );
     } finally {
       setSaving(false);
+    }
+    } else {
+     SimpleValidator.current.showMessages();
+      forceUpdate(1);
     }
   };
 
@@ -1007,6 +1007,11 @@ export default function EmailTemplates() {
                     placeholder="e.g. Welcome Email"
                     className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   />
+                   {SimpleValidator.current.message(
+                      "template name",
+                      formData.name,
+                      "required|min:3"
+                    )}
                 </div>
 
                 {/* Subject */}
@@ -1031,6 +1036,11 @@ export default function EmailTemplates() {
                     placeholder="Email subject"
                     className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   />
+                   {SimpleValidator.current.message(
+                      "subject",
+                      formData.subject,
+                      "required|min:3"
+                    )}
                 </div>
 
                 {/* Message */}
@@ -1052,6 +1062,11 @@ export default function EmailTemplates() {
                     placeholder="Enter plain text email message..."
                     className="w-full resize-y rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   />
+                   {SimpleValidator.current.message(
+                      "message",
+                      formData.message,
+                      "required|min:10"
+                    )}
                 </div>
 
                 {/* HTML */}

@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
-
+import SimpleReactValidator from "simple-react-validator";
+import PageTitle from "../../components/common/PageTitle";
 import {
   LockKeyhole,
   Mail,
@@ -15,7 +16,11 @@ import {
 } from "lucide-react";
 
 const Login = () => {
+
+  
   const navigate = useNavigate();
+  const [, forceUpdate] = useState();
+ const SimpleValidator = useRef(new SimpleReactValidator({ autoForceUpdate: { forceUpdate: forceUpdate } }));
 
   const [showPassword, setShowPassword] =
     useState(false);
@@ -76,121 +81,126 @@ const Login = () => {
 
   const submit = async (e) => {
     e.preventDefault();
-
-    if (loading) {
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      await login(
-        form.email.trim(),
-        form.password
-      );
-
-      success("Login successful.");
-
-      navigate("/dashboard");
-    } catch (error) {
-      console.error(
-        "Login error:",
-        error
-      );
-
-      // -----------------------------------------------
-      // Get backend error information
-      // -----------------------------------------------
-
-      const code =
-        error.response?.data?.code;
-
-      const message =
-        error.response?.data?.message;
-
-      // -----------------------------------------------
-      // EMAIL NOT FOUND
-      // -----------------------------------------------
-
-      if (code === "EMAIL_NOT_FOUND") {
-        showError(
-          "Email address does not exist."
-        );
-
-        setLoading(false);
+   if (SimpleValidator.current.allValid()) {
+      if (loading) {
         return;
       }
 
-      // -----------------------------------------------
-      // WRONG PASSWORD
-      // -----------------------------------------------
+      setLoading(true);
 
-      if (code === "INVALID_PASSWORD") {
-        showError(
-          "Incorrect password."
+      try {
+        await login(
+          form.email.trim(),
+          form.password
         );
 
-        setLoading(false);
-        return;
-      }
+        success("Login successful.");
 
-      // -----------------------------------------------
-      // ACCOUNT INACTIVE
-      // -----------------------------------------------
+        navigate("/dashboard");
+      } catch (error) {
+        console.error(
+          "Login error:",
+          error
+        );
 
-      if (
-        code === "ACCOUNT_INACTIVE"
-      ) {
+        // -----------------------------------------------
+        // Get backend error information
+        // -----------------------------------------------
+
+        const code =
+          error.response?.data?.code;
+
+        const message =
+          error.response?.data?.message;
+
+        // -----------------------------------------------
+        // EMAIL NOT FOUND
+        // -----------------------------------------------
+
+        if (code === "EMAIL_NOT_FOUND") {
+          showError(
+            "Email address does not exist."
+          );
+
+          setLoading(false);
+          return;
+        }
+
+        // -----------------------------------------------
+        // WRONG PASSWORD
+        // -----------------------------------------------
+
+        if (code === "INVALID_PASSWORD") {
+          showError(
+            "Incorrect password."
+          );
+
+          setLoading(false);
+          return;
+        }
+
+        // -----------------------------------------------
+        // ACCOUNT INACTIVE
+        // -----------------------------------------------
+
+        if (
+          code === "ACCOUNT_INACTIVE"
+        ) {
+          showError(
+            message ||
+            "Your account is inactive. Please contact the administrator."
+          );
+
+          setLoading(false);
+          return;
+        }
+
+        // -----------------------------------------------
+        // INVALID TOKEN
+        // -----------------------------------------------
+
+        if (code === "INVALID_TOKEN") {
+          showError(
+            "Your session is invalid. Please login again."
+          );
+
+          setLoading(false);
+          return;
+        }
+
+        // -----------------------------------------------
+        // TOKEN EXPIRED
+        // -----------------------------------------------
+
+        if (code === "TOKEN_EXPIRED") {
+          showError(
+            "Your session has expired. Please login again."
+          );
+
+          setLoading(false);
+          return;
+        }
+
+        // -----------------------------------------------
+        // GENERIC ERROR
+        // -----------------------------------------------
+
         showError(
           message ||
-            "Your account is inactive. Please contact the administrator."
-        );
-
-        setLoading(false);
-        return;
-      }
-
-      // -----------------------------------------------
-      // INVALID TOKEN
-      // -----------------------------------------------
-
-      if (code === "INVALID_TOKEN") {
-        showError(
-          "Your session is invalid. Please login again."
-        );
-
-        setLoading(false);
-        return;
-      }
-
-      // -----------------------------------------------
-      // TOKEN EXPIRED
-      // -----------------------------------------------
-
-      if (code === "TOKEN_EXPIRED") {
-        showError(
-          "Your session has expired. Please login again."
-        );
-
-        setLoading(false);
-        return;
-      }
-
-      // -----------------------------------------------
-      // GENERIC ERROR
-      // -----------------------------------------------
-
-      showError(
-        message ||
           "Unable to login. Please try again."
-      );
+        );
 
-      setLoading(false);
+        setLoading(false);
+      }
+    } else {
+     SimpleValidator.current.showMessages();
+      forceUpdate(1);
     }
   };
 
   return (
     <div className="min-h-screen w-full bg-slate-100">
+       <PageTitle />
       <div className="flex min-h-screen w-full">
 
         {/* =================================================
@@ -394,7 +404,11 @@ const Login = () => {
                         disabled:bg-slate-100
                       "
                     />
-
+                    {SimpleValidator.current.message(
+                      "email",
+                      form.email,
+                      "required|email"
+                    )}
                   </div>
 
                 </div>
@@ -444,6 +458,11 @@ const Login = () => {
                         disabled:bg-slate-100
                       "
                     />
+                    {SimpleValidator.current.message(
+                      "password",
+                      form.password,
+                      "required|min:3"
+                    )}
 
                     <button
                       type="button"
@@ -500,10 +519,9 @@ const Login = () => {
                         rounded
                         border
                         transition
-                        ${
-                          rememberMe
-                            ? "border-blue-600 bg-blue-600"
-                            : "border-slate-300"
+                        ${rememberMe
+                          ? "border-blue-600 bg-blue-600"
+                          : "border-slate-300"
                         }
                       `}
                     >

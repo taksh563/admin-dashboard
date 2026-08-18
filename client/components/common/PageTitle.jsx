@@ -4,6 +4,8 @@ import { useLocation } from "react-router-dom";
 const APP_NAME = "Admin Dashboard";
 
 const PAGE_TITLES = {
+  "/": "Login",
+  "/login": "Login",
   "/dashboard": "Dashboard",
   "/users": "Users",
   "/categories": "Categories",

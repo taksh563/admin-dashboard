@@ -2389,6 +2389,7 @@ const ProductPage = () => {
                 handleSubmit
               }
               className="space-y-5 p-6"
+              encType="multipart/form-data"
             >
 
               {/* PRODUCT NAME */}

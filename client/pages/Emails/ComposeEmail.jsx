@@ -12,9 +12,8 @@ import { useToast } from "../../context/ToastContext";
 
 import emailTemplateService from "../../services/emailTemplate.service";
 
-import {
-  replaceTemplateVariables,
-} from "../../utils/replaceTemplateVariable";
+import {replaceTemplateVariables,} from "../../utils/replaceTemplateVariable";
+
 
 const ComposeEmail = () => {
   // =========================================
