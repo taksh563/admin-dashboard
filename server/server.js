@@ -7,15 +7,16 @@ dotenv.config();
 
 connectDB();
 
-transporter.verify()
+transporter
+  .verify()
   .then(() => {
     console.log(
-      "✅ Email SMTP server is ready"
+      " Email SMTP server is ready"
     );
   })
   .catch((error) => {
     console.error(
-      "❌ Email SMTP configuration error:",
+      " Email SMTP configuration error:",
       error.message
     );
   });

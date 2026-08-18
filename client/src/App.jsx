@@ -12,6 +12,11 @@ import RoleRoute from "../routes/RoleRoute";
 
 import DashboardLayout from "../layouts/DashboardLayout";
 import Logs from "../pages/Logs/Logs";
+import EmailHistory from "../pages/Emails/EmailHistory";
+import ComposeEmail from "../pages/Emails/ComposeEmail";
+import EmailTemplates from "../pages/Emails/EmailTemplates";
+import CategoryList from "../pages/Categories/CategoryList";
+import ProductPage from "../pages/Products/ProductPage";
 
 function App() {
   return (
@@ -61,25 +66,62 @@ function App() {
             </RoleRoute>
           }
         />
+        <Route
+          path="/email/history"
+          element={
+            <RoleRoute roles={["admin"]}>
+              <EmailHistory />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/email/compose"
+          element={
+            <RoleRoute roles={["admin"]}>
+              <ComposeEmail />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/email/templates"
+          element={
+            <RoleRoute roles={["admin"]}>
+              <EmailTemplates />
+            </RoleRoute>
+          }
+        />
+
+         <Route
+          path="/categories"
+          element={
+            <RoleRoute roles={["admin", "manager"]}>
+              <CategoryList />
+            </RoleRoute>
+          }
+        />
+
+         <Route
+          path="/products"
+          element={
+            <RoleRoute roles={["admin", "manager"]}>
+              <ProductPage />
+            </RoleRoute>
+          }
+        />
 
         {/* <Route
           path="/products"
           element={
             <RoleRoute roles={["admin", "manager"]}>
-              <Products />
+              <ProductPage />
             </RoleRoute>
           }
         />
 
        
-        <Route
-          path="/categories"
-          element={
-            <RoleRoute roles={["admin", "manager"]}>
-              <Categories />
-            </RoleRoute>
-          }
-        />
+       
 
        
         <Route

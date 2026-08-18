@@ -1,7 +1,7 @@
 import bcrypt from "bcrypt";
 import User from "../models/user.model.js";
 import { createAuditLog } from "../utils/auditLogger.js";
-import emailServices from "../services/email.service.js"
+import emailService from "../services/email.service.js"
 
 /**
  * GET /api/users
@@ -23,21 +23,21 @@ export const getUsers = async (req, res) => {
 
     const filter = search
       ? {
-          $or: [
-            {
-              name: {
-                $regex: search,
-                $options: "i",
-              },
+        $or: [
+          {
+            name: {
+              $regex: search,
+              $options: "i",
             },
-            {
-              email: {
-                $regex: search,
-                $options: "i",
-              },
+          },
+          {
+            email: {
+              $regex: search,
+              $options: "i",
             },
-          ],
-        }
+          },
+        ],
+      }
       : {};
 
     const total = await User.countDocuments(filter);
@@ -188,61 +188,19 @@ export const createUser = async (req, res) => {
     try {
       await emailService.sendEmail({
         to: user.email,
-
-        subject:
-          "Welcome to Admin Dashboard",
-
-        text:
-          `Hello ${user.name}, your account has been created.`,
-
-        html: `
-          <div style="
-            font-family: Arial, sans-serif;
-            max-width: 600px;
-            margin: auto;
-            padding: 30px;
-            color: #334155;
-          ">
-
-            <h2 style="
-              color: #2563eb;
-            ">
-              Welcome ${user.name}
-            </h2>
-
-            <p>
-              Your account has been
-              successfully created.
-            </p>
-
-            <p>
-              You can now log in to the
-              Admin Dashboard using your
-              registered email address.
-            </p>
-
-            <p>
-              Regards,<br>
-              <strong>Admin Team</strong>
-            </p>
-
-          </div>
-        `,
+        subject: "Welcome to Admin Dashboard",
+        text: `Hello ${user.name}, your account has been created.`,
+        html: `<h2>Welcome ${user.name}</h2>`,
+        sentBy: req.user?._id,
       });
 
-      console.log(
-        `Welcome email sent to ${user.email}`
-      );
-
     } catch (emailError) {
-
-      // Don't fail user creation
-      // if email fails.
 
       console.error(
         "Welcome email failed:",
         emailError.message
       );
+
     }
 
     // send email
@@ -477,14 +435,12 @@ export const updateUserStatus = async (
       module: "USER",
 
       description:
-        `Changed user "${user.name}" status from ${
-          oldStatus
-            ? "Active"
-            : "Inactive"
-        } to ${
-          newStatus
-            ? "Active"
-            : "Inactive"
+        `Changed user "${user.name}" status from ${oldStatus
+          ? "Active"
+          : "Inactive"
+        } to ${newStatus
+          ? "Active"
+          : "Inactive"
         }`,
 
       recordId: user._id,
