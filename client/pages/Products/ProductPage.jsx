@@ -1,180 +1,254 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
+  useRef,
   useState,
 } from "react";
 
-import Select from "react-select";
+import {
+  Plus,
+  Search,
+  Pencil,
+  Trash2,
+  Eye,
+  X,
+  Upload,
+  Image as ImageIcon,
+  Star,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  RefreshCw,
+  Package,
+  Loader2,
+  AlertCircle,
+} from "lucide-react";
 
 import productService from "../../services/product.service";
-import categoryService from "../../services/category.service";
-
+import api from "../../api/axios";
 import { useToast } from "../../context/ToastContext";
+import { getErrorMessage } from "../../utils/errorMessage";
 
-// ======================================================
-// INITIAL FORM
-// ======================================================
+// ==========================================================
+// CONSTANTS
+// ==========================================================
 
-const getInitialForm = () => ({
+const INITIAL_FORM = {
   name: "",
   sku: "",
   description: "",
   price: "",
-  stock: 0,
+  stock: "",
   categories: [],
   isActive: true,
-});
+};
 
-// ======================================================
-// INITIAL FILTERS
-// ======================================================
-
-const getInitialFilters = () => ({
-  status: "all",
-  categories: [],
+const INITIAL_FILTERS = {
+  search: "",
+  status: "",
+  category: "",
   minPrice: "",
   maxPrice: "",
   minStock: "",
   maxStock: "",
-  stockStatus: "all",
   sortBy: "createdAt",
   sortOrder: "desc",
-});
+};
 
-// ======================================================
-// NORMALIZE API RESPONSE
-// ======================================================
+const PAGE_LIMIT = 10;
 
-const normalizeResponse = (response) => {
-  if (
-    response &&
-    typeof response === "object" &&
-    typeof response.success !== "undefined"
-  ) {
-    return response;
+const ALLOWED_IMAGE_TYPES = [
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+];
+
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+const MAX_IMAGES = 10;
+
+// ==========================================================
+// HELPERS
+// ==========================================================
+
+const getId = (value) => {
+  if (!value) return "";
+
+  if (typeof value === "string") {
+    return value;
   }
 
-  if (
-    response?.data &&
-    typeof response.data === "object"
-  ) {
-    return response.data;
+  return String(value._id || value.id || "");
+};
+
+const getCategoryName = (category) => {
+  if (!category) return "";
+
+  if (typeof category === "string") {
+    return category;
   }
 
-  return response || {};
+  return category.name || "";
 };
 
-// ======================================================
-// GET API MESSAGE
-// ======================================================
+const getImageUrl = (image) => {
+  if (!image) return "";
 
-const getResponseMessage = (
-  response,
-  fallback
-) => {
-  const result =
-    normalizeResponse(response);
+  const rawUrl =
+    typeof image === "string"
+      ? image
+      : image.url || image.path || "";
 
-  return (
-    result?.message ||
-    response?.message ||
-    response?.data?.message ||
-    fallback
+  if (!rawUrl) {
+    return "";
+  }
+
+  // Blob URL
+  if (rawUrl.startsWith("blob:")) {
+    return rawUrl;
+  }
+
+  // Already complete URL
+  if (
+    rawUrl.startsWith("http://") ||
+    rawUrl.startsWith("https://")
+  ) {
+    return rawUrl;
+  }
+
+  const baseURL =
+    api.defaults?.baseURL ||
+    "http://localhost:5000/api";
+
+  const serverURL = baseURL.replace(
+    /\/api\/?$/,
+    ""
   );
+
+  if (rawUrl.startsWith("/")) {
+    return `${serverURL}${rawUrl}`;
+  }
+
+  return `${serverURL}/${rawUrl}`;
 };
 
-// ======================================================
-// GET ERROR MESSAGE
-// ======================================================
+const formatCurrency = (value) => {
+  const number = Number(value);
 
-const getErrorMessage = (
-  error,
-  fallback
-) => {
-  return (
-    error?.response?.data?.message ||
-    error?.response?.data?.error ||
-    error?.data?.message ||
-    error?.message ||
-    fallback
-  );
+  if (Number.isNaN(number)) {
+    return "₹0.00";
+  }
+
+  return number.toLocaleString("en-IN", {
+    style: "currency",
+    currency: "INR",
+  });
 };
 
-// ======================================================
-// PRODUCT PAGE
-// ======================================================
+const normalizeProduct = (product) => {
+  if (!product) {
+    return null;
+  }
+
+  return {
+    ...product,
+
+    _id:
+      product._id ||
+      product.id ||
+      "",
+
+    categories: Array.isArray(product.categories)
+      ? product.categories
+      : [],
+
+    images: Array.isArray(product.images)
+      ? product.images
+      : [],
+  };
+};
+
+// ==========================================================
+// COMPONENT
+// ==========================================================
 
 const ProductPage = () => {
-  // ====================================================
-  // TOAST
-  // ====================================================
+  const { showToast } = useToast();
 
-  const {
-    success,
-    error,
-    warning,
-    info,
-  } = useToast();
+  // ========================================================
+  // PRODUCT DATA
+  // ========================================================
 
-  // ====================================================
-  // PRODUCT STATE
-  // ====================================================
+  const [products, setProducts] = useState([]);
 
-  const [products, setProducts] =
-    useState([]);
+  const [categories, setCategories] = useState([]);
 
-  const [categories, setCategories] =
-    useState([]);
+  const [loading, setLoading] = useState(false);
 
-  const [loading, setLoading] =
+  const [categoriesLoading, setCategoriesLoading] =
     useState(false);
 
-  const [categoryLoading, setCategoryLoading] =
-    useState(false);
+  const [error, setError] = useState("");
 
-  // ====================================================
+  // ========================================================
   // PAGINATION
-  // ====================================================
+  // ========================================================
 
-  const [page, setPage] =
-    useState(1);
+  const [page, setPage] = useState(1);
 
-  const limit = 10;
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: PAGE_LIMIT,
+    total: 0,
+    totalPages: 0,
+  });
 
-  const [pagination, setPagination] =
-    useState({
-      page: 1,
-      limit: 10,
-      total: 0,
-      totalPages: 0,
-    });
+  // ========================================================
+  // FILTERS
+  // ========================================================
 
-  // ====================================================
-  // SEARCH
-  // ====================================================
-
-  const [search, setSearch] =
-    useState("");
+  const [filters, setFilters] =
+    useState(INITIAL_FILTERS);
 
   const [searchInput, setSearchInput] =
     useState("");
 
-  // ====================================================
-  // ADVANCED FILTER STATE
-  // ====================================================
+  // ========================================================
+  // FORM
+  // ========================================================
 
-  const [filters, setFilters] =
-    useState(getInitialFilters());
+  const [form, setForm] =
+    useState(INITIAL_FORM);
 
-  const [showFilters, setShowFilters] =
-    useState(false);
+  const [formErrors, setFormErrors] =
+    useState({});
 
-  // ====================================================
+  const [editingProduct, setEditingProduct] =
+    useState(null);
+
+  // ========================================================
+  // IMAGE STATES
+  // ========================================================
+
+  const [selectedFiles, setSelectedFiles] =
+    useState([]);
+
+  const [previewImages, setPreviewImages] =
+    useState([]);
+
+  const [existingImages, setExistingImages] =
+    useState([]);
+
+  const fileInputRef = useRef(null);
+
+  // ========================================================
   // MODALS
-  // ====================================================
+  // ========================================================
 
   const [showFormModal, setShowFormModal] =
+    useState(false);
+
+  const [showViewModal, setShowViewModal] =
     useState(false);
 
   const [showDeleteModal, setShowDeleteModal] =
@@ -183,556 +257,252 @@ const ProductPage = () => {
   const [showStatusModal, setShowStatusModal] =
     useState(false);
 
-  // ====================================================
-  // FORM
-  // ====================================================
+  const [showImageDeleteModal, setShowImageDeleteModal] =
+    useState(false);
 
-  const [form, setForm] =
-    useState(getInitialForm());
-
-  const [formErrors, setFormErrors] =
-    useState({});
-
-  const [editingProduct, setEditingProduct] =
-    useState(null);
+  // ========================================================
+  // SELECTED DATA
+  // ========================================================
 
   const [selectedProduct, setSelectedProduct] =
     useState(null);
 
-  // ====================================================
-  // SUBMIT STATES
-  // ====================================================
+  const [selectedImage, setSelectedImage] =
+    useState(null);
 
-  const [saving, setSaving] =
-    useState(false);
+  // ========================================================
+  // ACTION LOADING
+  // ========================================================
 
-  const [deleting, setDeleting] =
-    useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const [deleting, setDeleting] = useState(false);
 
   const [changingStatus, setChangingStatus] =
     useState(false);
 
-  // ====================================================
-  // CATEGORY SELECT OPTIONS
-  // ====================================================
+  const [imageActionLoading, setImageActionLoading] =
+    useState(false);
 
-  const categoryFilterOptions =
-    useMemo(() => {
-      return categories;
-    }, [categories]);
+  // ========================================================
+  // CLEANUP PREVIEW URLS
+  // ========================================================
 
-  // ====================================================
-  // ACTIVE FILTER COUNT
-  // ====================================================
-
-  const activeFilterCount =
-    useMemo(() => {
-      let count = 0;
-
+  const cleanupPreviewUrls = useCallback(() => {
+    previewImages.forEach((preview) => {
       if (
-        filters.status &&
-        filters.status !== "all"
+        preview?.url &&
+        preview.url.startsWith("blob:")
       ) {
-        count++;
+        URL.revokeObjectURL(preview.url);
       }
+    });
+  }, [previewImages]);
 
-      if (
-        Array.isArray(
-          filters.categories
-        ) &&
-        filters.categories.length > 0
-      ) {
-        count++;
+  // ========================================================
+  // FETCH CATEGORIES
+  // ========================================================
+
+  const fetchCategories = useCallback(
+    async () => {
+      try {
+        setCategoriesLoading(true);
+
+        const response = await api.get(
+          "/categories",
+          {
+            params: {
+              page: 1,
+              limit: 100,
+              status: "active",
+            },
+          }
+        );
+
+        if (response.data?.success) {
+          const categoryData =
+            response.data.data || [];
+
+          setCategories(
+            Array.isArray(categoryData)
+              ? categoryData
+              : []
+          );
+        } else {
+          setCategories([]);
+        }
+      } catch (err) {
+        console.error(
+          "Fetch categories error:",
+          err
+        );
+
+        setCategories([]);
+
+          showToast({
+          type: "success",
+          message:getErrorMessage(err) ||
+            "Unable to load categories.",
+        });
+
+        
+      } finally {
+        setCategoriesLoading(false);
       }
+    },
+    [showToast]
+  );
 
-      if (
-        String(
-          filters.minPrice
-        ).trim() !== ""
-      ) {
-        count++;
-      }
+  // ========================================================
+  // FETCH PRODUCTS
+  // ========================================================
 
-      if (
-        String(
-          filters.maxPrice
-        ).trim() !== ""
-      ) {
-        count++;
-      }
-
-      if (
-        String(
-          filters.minStock
-        ).trim() !== ""
-      ) {
-        count++;
-      }
-
-      if (
-        String(
-          filters.maxStock
-        ).trim() !== ""
-      ) {
-        count++;
-      }
-
-      if (
-        filters.stockStatus &&
-        filters.stockStatus !== "all"
-      ) {
-        count++;
-      }
-
-      if (
-        filters.sortBy !== "createdAt" ||
-        filters.sortOrder !== "desc"
-      ) {
-        count++;
-      }
-
-      return count;
-    }, [filters]);
-
-  // ====================================================
-  // LOAD PRODUCTS
-  // ====================================================
-
-  const loadProducts = useCallback(
+  const fetchProducts = useCallback(
     async () => {
       try {
         setLoading(true);
+        setError("");
 
-        const requestParams = {
+        const params = {
           page,
-          limit,
-          search,
+          limit: PAGE_LIMIT,
+          sortBy: filters.sortBy,
+          sortOrder: filters.sortOrder,
         };
 
-        // ----------------------------------------------
-        // STATUS
-        // ----------------------------------------------
+        if (filters.search.trim()) {
+          params.search =
+            filters.search.trim();
+        }
 
-        if (
-          filters.status &&
-          filters.status !== "all"
-        ) {
-          requestParams.status =
+        if (filters.status) {
+          params.status =
             filters.status;
         }
 
-        // ----------------------------------------------
-        // CATEGORY
-        // ----------------------------------------------
-
-        if (
-          Array.isArray(
-            filters.categories
-          ) &&
-          filters.categories.length > 0
-        ) {
-          requestParams.category =
-            filters.categories
-              .map(
-                (category) =>
-                  category.value
-              )
-              .join(",");
-
-          requestParams.categories =
-            filters.categories
-              .map(
-                (category) =>
-                  category.value
-              );
+        if (filters.category) {
+          params.category =
+            filters.category;
         }
 
-        // ----------------------------------------------
-        // PRICE RANGE
-        // ----------------------------------------------
-
-        if (
-          String(
-            filters.minPrice
-          ).trim() !== ""
-        ) {
-          requestParams.minPrice =
-            Number(
-              filters.minPrice
-            );
+        if (filters.minPrice !== "") {
+          params.minPrice =
+            filters.minPrice;
         }
 
-        if (
-          String(
-            filters.maxPrice
-          ).trim() !== ""
-        ) {
-          requestParams.maxPrice =
-            Number(
-              filters.maxPrice
-            );
+        if (filters.maxPrice !== "") {
+          params.maxPrice =
+            filters.maxPrice;
         }
 
-        // ----------------------------------------------
-        // STOCK RANGE
-        // ----------------------------------------------
-
-        if (
-          String(
-            filters.minStock
-          ).trim() !== ""
-        ) {
-          requestParams.minStock =
-            Number(
-              filters.minStock
-            );
+        if (filters.minStock !== "") {
+          params.minStock =
+            filters.minStock;
         }
 
-        if (
-          String(
-            filters.maxStock
-          ).trim() !== ""
-        ) {
-          requestParams.maxStock =
-            Number(
-              filters.maxStock
-            );
+        if (filters.maxStock !== "") {
+          params.maxStock =
+            filters.maxStock;
         }
-
-        // ----------------------------------------------
-        // STOCK STATUS
-        // ----------------------------------------------
-
-        if (
-          filters.stockStatus &&
-          filters.stockStatus !== "all"
-        ) {
-          requestParams.stockStatus =
-            filters.stockStatus;
-        }
-
-        // ----------------------------------------------
-        // SORT
-        // ----------------------------------------------
-
-        requestParams.sortBy =
-          filters.sortBy;
-
-        requestParams.sortOrder =
-          filters.sortOrder;
-
-        console.log(
-          "Product request params:",
-          requestParams
-        );
 
         const response =
           await productService.getProducts(
-            requestParams
+            params
           );
 
-        const result =
-          normalizeResponse(response);
+        if (response?.success) {
+          const data =
+            response.data || [];
 
-        console.log(
-          "Products response:",
-          result
-        );
-
-        if (result?.success) {
           setProducts(
-            Array.isArray(result.data)
-              ? result.data
+            Array.isArray(data)
+              ? data
+                  .map(normalizeProduct)
+                  .filter(Boolean)
               : []
           );
 
           setPagination(
-            result.pagination || {
+            response.pagination || {
               page,
-              limit,
+              limit: PAGE_LIMIT,
               total: 0,
               totalPages: 0,
             }
           );
+        } else {
+          setProducts([]);
 
-          return true;
+          setError(
+            response?.message ||
+              "Unable to load products."
+          );
         }
-
-        error(
-          getResponseMessage(
-            response,
-            "Unable to load products."
-          )
-        );
-
-        return false;
       } catch (err) {
         console.error(
-          "Load products error:",
+          "Fetch products error:",
           err
         );
 
-        error(
-          getErrorMessage(
-            err,
-            "Unable to load products."
-          )
-        );
+        const message =
+          err.response?.data?.message ||
+          getErrorMessage(err) ||
+          "Unable to load products.";
 
-        return false;
+        setError(message);
       } finally {
         setLoading(false);
       }
     },
-    [
-      page,
-      limit,
-      search,
-      filters,
-      error,
-    ]
+    [page, filters]
   );
 
-  // ====================================================
-  // LOAD CATEGORIES
-  // ====================================================
-
-  const loadCategories = useCallback(
-    async () => {
-      try {
-        setCategoryLoading(true);
-
-        const response =
-          await categoryService.getCategories({
-            page: 1,
-            limit: 1000,
-          });
-
-        const result =
-          normalizeResponse(response);
-
-        console.log(
-          "Categories response:",
-          result
-        );
-
-        if (result?.success) {
-          const options =
-            (result.data || [])
-              .filter(
-                (category) =>
-                  Boolean(
-                    category.isActive
-                  )
-              )
-              .map((category) => ({
-                value: category._id,
-                label: category.name,
-              }));
-
-          setCategories(options);
-
-          return;
-        }
-
-        error(
-          getResponseMessage(
-            response,
-            "Unable to load categories."
-          )
-        );
-      } catch (err) {
-        console.error(
-          "Load categories error:",
-          err
-        );
-
-        error(
-          getErrorMessage(
-            err,
-            "Unable to load categories."
-          )
-        );
-      } finally {
-        setCategoryLoading(false);
-      }
-    },
-    [error]
-  );
-
-  // ====================================================
+  // ========================================================
   // INITIAL LOAD
-  // ====================================================
+  // ========================================================
 
   useEffect(() => {
-    loadProducts();
-  }, [loadProducts]);
+    fetchCategories();
+  }, [fetchCategories]);
 
   useEffect(() => {
-    loadCategories();
-  }, [loadCategories]);
+    fetchProducts();
+  }, [fetchProducts]);
 
-  // ====================================================
+  // ========================================================
   // SEARCH
-  // ====================================================
+  // ========================================================
 
   const handleSearch = (e) => {
     e.preventDefault();
 
-    setPage(1);
-
-    setSearch(
-      searchInput.trim()
-    );
-  };
-
-  // ====================================================
-  // CLEAR SEARCH
-  // ====================================================
-
-  const handleClearSearch = () => {
-    setSearchInput("");
-
-    setSearch("");
+    setFilters((previous) => ({
+      ...previous,
+      search: searchInput,
+    }));
 
     setPage(1);
   };
 
-  // ====================================================
-  // FILTER CHANGE
-  // ====================================================
-
-  const handleFilterChange = (
-    name,
-    value
-  ) => {
-    setFilters(
-      (previous) => ({
-        ...previous,
-        [name]: value,
-      })
-    );
-
-    setPage(1);
-  };
-
-  // ====================================================
+  // ========================================================
   // RESET FILTERS
-  // ====================================================
+  // ========================================================
 
   const handleResetFilters = () => {
-    setFilters(
-      getInitialFilters()
-    );
+    setSearchInput("");
 
-    setPage(1);
-  };
-
-  // ====================================================
-  // APPLY FILTERS
-  // ====================================================
-
-  const handleApplyFilters = () => {
-    setPage(1);
-
-    setShowFilters(false);
-
-    info(
-      "Product filters applied."
-    );
-  };
-
-  // ====================================================
-  // OPEN ADD MODAL
-  // ====================================================
-
-  const openAddModal = () => {
-    setEditingProduct(null);
-
-    setForm(
-      getInitialForm()
-    );
-
-    setFormErrors({});
-
-    setShowFormModal(true);
-  };
-
-  // ====================================================
-  // OPEN EDIT MODAL
-  // ====================================================
-
-  const openEditModal = (
-    product
-  ) => {
-    setEditingProduct(product);
-
-    const selectedCategories =
-      (product.categories || [])
-        .filter(Boolean)
-        .map((category) => ({
-          value:
-            category._id ||
-            category.value,
-
-          label:
-            category.name ||
-            category.label,
-        }));
-
-    setForm({
-      name:
-        product.name || "",
-
-      sku:
-        product.sku || "",
-
-      description:
-        product.description || "",
-
-      price:
-        product.price ?? "",
-
-      stock:
-        product.stock ?? 0,
-
-      categories:
-        selectedCategories,
-
-      isActive:
-        Boolean(product.isActive),
+    setFilters({
+      ...INITIAL_FILTERS,
     });
 
-    setFormErrors({});
-
-    setShowFormModal(true);
+    setPage(1);
   };
 
-  // ====================================================
-  // CLOSE FORM MODAL
-  // ====================================================
+  // ========================================================
+  // FORM INPUT
+  // ========================================================
 
-  const closeFormModal = () => {
-    if (saving) {
-      return;
-    }
-
-    setShowFormModal(false);
-
-    setEditingProduct(null);
-
-    setForm(
-      getInitialForm()
-    );
-
-    setFormErrors({});
-  };
-
-  // ====================================================
-  // FORM CHANGE
-  // ====================================================
-
-  const handleChange = (e) => {
+  const handleInputChange = (e) => {
     const {
       name,
       value,
@@ -742,7 +512,6 @@ const ProductPage = () => {
 
     setForm((previous) => ({
       ...previous,
-
       [name]:
         type === "checkbox"
           ? checked
@@ -755,19 +524,33 @@ const ProductPage = () => {
     }));
   };
 
-  // ====================================================
-  // CATEGORY CHANGE
-  // ====================================================
+  // ========================================================
+  // CATEGORY SELECTION
+  // ========================================================
 
   const handleCategoryChange = (
-    selected
+    categoryId
   ) => {
-    setForm((previous) => ({
-      ...previous,
+    setForm((previous) => {
+      const exists =
+        previous.categories.includes(
+          categoryId
+        );
 
-      categories:
-        selected || [],
-    }));
+      return {
+        ...previous,
+
+        categories: exists
+          ? previous.categories.filter(
+              (id) =>
+                id !== categoryId
+            )
+          : [
+              ...previous.categories,
+              categoryId,
+            ],
+      };
+    });
 
     setFormErrors((previous) => ({
       ...previous,
@@ -775,66 +558,195 @@ const ProductPage = () => {
     }));
   };
 
-  // ====================================================
+  // ========================================================
+  // FILE SELECTION
+  // ========================================================
+
+  const handleFileChange = (e) => {
+    const files = Array.from(
+      e.target.files || []
+    );
+
+    if (!files.length) {
+      return;
+    }
+
+    const validFiles = [];
+
+    for (const file of files) {
+      if (
+        !ALLOWED_IMAGE_TYPES.includes(
+          file.type
+        )
+      ) {
+
+          showToast({
+          type: "error",
+          message:`${file.name}: Only JPG, JPEG, PNG and WEBP images are allowed.`,
+        });
+
+        
+
+        continue;
+      }
+
+      if (file.size > MAX_IMAGE_SIZE) {
+       
+         showToast({
+          type: "error",
+          message:`${file.name}: Maximum file size is 5 MB.`,
+        });
+
+        continue;
+      }
+
+      validFiles.push(file);
+    }
+
+    if (!validFiles.length) {
+      e.target.value = "";
+      return;
+    }
+
+    const currentImageCount =
+      existingImages.length +
+      selectedFiles.length;
+
+    const availableSlots =
+      MAX_IMAGES -
+      currentImageCount;
+
+    if (availableSlots <= 0) {
+       showToast({
+          type: "error",
+          message:"Maximum 10 images are allowed per product.",
+        });
+
+      
+
+      e.target.value = "";
+      return;
+    }
+
+    const filesToAdd =
+      validFiles.slice(
+        0,
+        availableSlots
+      );
+
+    if (
+      validFiles.length >
+      availableSlots
+    ) {
+
+      showToast({
+          type: "error",
+          message:`Only ${availableSlots} more image${
+          availableSlots === 1
+            ? ""
+            : "s"
+        } can be added.`,
+        });
+
+     
+    }
+
+    setSelectedFiles((previous) => [
+      ...previous,
+      ...filesToAdd,
+    ]);
+
+    const newPreviews =
+      filesToAdd.map((file) => ({
+        id: `${file.name}-${file.lastModified}-${Math.random()}`,
+        url: URL.createObjectURL(file),
+        file,
+      }));
+
+    setPreviewImages((previous) => [
+      ...previous,
+      ...newPreviews,
+    ]);
+
+    setFormErrors((previous) => ({
+      ...previous,
+      images: "",
+    }));
+
+    e.target.value = "";
+  };
+
+  // ========================================================
+  // REMOVE NEW IMAGE
+  // ========================================================
+
+  const handleRemoveSelectedImage = (
+    index
+  ) => {
+    const preview =
+      previewImages[index];
+
+    if (
+      preview?.url &&
+      preview.url.startsWith("blob:")
+    ) {
+      URL.revokeObjectURL(
+        preview.url
+      );
+    }
+
+    setPreviewImages((previous) =>
+      previous.filter(
+        (_, imageIndex) =>
+          imageIndex !== index
+      )
+    );
+
+    setSelectedFiles((previous) =>
+      previous.filter(
+        (_, fileIndex) =>
+          fileIndex !== index
+      )
+    );
+  };
+
+  // ========================================================
   // VALIDATE FORM
-  // ====================================================
+  // ========================================================
 
   const validateForm = () => {
     const errors = {};
 
-    const productName =
-      form.name.trim();
-
-    const sku =
-      form.sku.trim();
-
-    const price =
-      String(form.price).trim();
-
-    const stock =
-      String(form.stock).trim();
-
-    // ------------------------------------------
-    // PRODUCT NAME
-    // ------------------------------------------
-
-    if (!productName) {
+    if (!form.name.trim()) {
       errors.name =
         "Product name is required.";
-    } else if (
-      productName.length < 2
-    ) {
-      errors.name =
-        "Product name must be at least 2 characters.";
-    } else if (
-      productName.length > 150
-    ) {
-      errors.name =
-        "Product name cannot exceed 150 characters.";
     }
 
-    // ------------------------------------------
-    // SKU
-    // ------------------------------------------
-
-    if (!sku) {
+    if (!form.sku.trim()) {
       errors.sku =
         "SKU is required.";
-    } else if (
-      sku.length < 2
-    ) {
-      errors.sku =
-        "SKU must be at least 2 characters.";
-    } else if (
-      sku.length > 100
-    ) {
-      errors.sku =
-        "SKU cannot exceed 100 characters.";
     }
 
-    // ------------------------------------------
-    // CATEGORY
-    // ------------------------------------------
+    if (
+      form.price === "" ||
+      Number.isNaN(Number(form.price)) ||
+      Number(form.price) < 0
+    ) {
+      errors.price =
+        "Please enter a valid price.";
+    }
+
+    if (
+      form.stock === "" ||
+      Number.isNaN(Number(form.stock)) ||
+      Number(form.stock) < 0 ||
+      !Number.isInteger(
+        Number(form.stock)
+      )
+    ) {
+      errors.stock =
+        "Stock must be a valid whole number.";
+    }
 
     if (
       !Array.isArray(
@@ -846,123 +758,185 @@ const ProductPage = () => {
         "Please select at least one category.";
     }
 
-    // ------------------------------------------
-    // PRICE
-    // ------------------------------------------
+    const totalImages =
+      existingImages.length +
+      selectedFiles.length;
 
-    if (price === "") {
-      errors.price =
-        "Price is required.";
-    } else if (
-      Number.isNaN(Number(price))
+    if (
+      !editingProduct &&
+      selectedFiles.length === 0
     ) {
-      errors.price =
-        "Please enter a valid price.";
-    } else if (
-      Number(price) < 0
-    ) {
-      errors.price =
-        "Price cannot be negative.";
+      errors.images =
+        "Please upload at least one product image.";
     }
 
-    // ------------------------------------------
-    // STOCK
-    // ------------------------------------------
-
-    if (stock === "") {
-      errors.stock =
-        "Stock is required.";
-    } else if (
-      Number.isNaN(Number(stock))
+    if (
+      totalImages > MAX_IMAGES
     ) {
-      errors.stock =
-        "Please enter a valid stock quantity.";
-    } else if (
-      Number(stock) < 0
-    ) {
-      errors.stock =
-        "Stock cannot be negative.";
-    } else if (
-      !Number.isInteger(
-        Number(stock)
-      )
-    ) {
-      errors.stock =
-        "Stock must be a whole number.";
+      errors.images =
+        "Maximum 10 images are allowed.";
     }
 
-    return errors;
+    setFormErrors(errors);
+
+    return (
+      Object.keys(errors).length === 0
+    );
   };
 
-  // ====================================================
+  // ========================================================
+  // OPEN CREATE MODAL
+  // ========================================================
+
+  const handleAddProduct = () => {
+    cleanupPreviewUrls();
+
+    setEditingProduct(null);
+
+    setForm({
+      ...INITIAL_FORM,
+    });
+
+    setFormErrors({});
+
+    setSelectedFiles([]);
+
+    setPreviewImages([]);
+
+    setExistingImages([]);
+
+    setSelectedProduct(null);
+
+    setShowFormModal(true);
+  };
+
+  // ========================================================
+  // OPEN EDIT MODAL
+  // ========================================================
+
+  const handleEditProduct = (
+    product
+  ) => {
+    cleanupPreviewUrls();
+
+    setEditingProduct(product);
+
+    setForm({
+      name: product.name || "",
+
+      sku: product.sku || "",
+
+      description:
+        product.description || "",
+
+      price:
+        product.price ?? "",
+
+      stock:
+        product.stock ?? "",
+
+      categories:
+        Array.isArray(
+          product.categories
+        )
+          ? product.categories.map(
+              getId
+            )
+          : [],
+
+      isActive:
+        Boolean(
+          product.isActive
+        ),
+    });
+
+    setExistingImages(
+      Array.isArray(product.images)
+        ? product.images
+        : []
+    );
+
+    setSelectedFiles([]);
+
+    setPreviewImages([]);
+
+    setFormErrors({});
+
+    setShowFormModal(true);
+  };
+
+  // ========================================================
+  // CLOSE FORM MODAL
+  // ========================================================
+
+  const closeFormModal = () => {
+    if (saving) {
+      return;
+    }
+
+    cleanupPreviewUrls();
+
+    setShowFormModal(false);
+
+    setEditingProduct(null);
+
+    setForm({
+      ...INITIAL_FORM,
+    });
+
+    setFormErrors({});
+
+    setSelectedFiles([]);
+
+    setPreviewImages([]);
+
+    setExistingImages([]);
+  };
+
+  // ========================================================
   // SUBMIT PRODUCT
-  // ====================================================
+  // ========================================================
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    const errors =
-      validateForm();
-
-    setFormErrors(errors);
-
-    if (
-      Object.keys(errors).length > 0
-    ) {
-      error(
-        Object.values(errors)[0]
-      );
-
+    if (!validateForm()) {
       return;
     }
 
     try {
       setSaving(true);
 
-      const isEdit =
-        Boolean(
-          editingProduct?._id
-        );
-
       const payload = {
-        name:
-          form.name.trim(),
+        name: form.name.trim(),
 
-        sku:
-          form.sku
-            .trim()
-            .toUpperCase(),
+        sku: form.sku
+          .trim()
+          .toUpperCase(),
 
         description:
           form.description.trim(),
 
-        price:
-          Number(form.price),
+        price: Number(form.price),
 
-        stock:
-          Number(form.stock),
+        stock: Number(form.stock),
 
         categories:
-          form.categories.map(
-            (category) =>
-              category.value
-          ),
+          form.categories,
 
         isActive:
           Boolean(form.isActive),
-      };
 
-      console.log(
-        "Product payload:",
-        payload
-      );
+        images:
+          selectedFiles,
+      };
 
       let response;
 
-      if (isEdit) {
+      if (editingProduct) {
         response =
           await productService.updateProduct(
-            editingProduct._id,
+            getId(editingProduct),
             payload
           );
       } else {
@@ -972,134 +946,108 @@ const ProductPage = () => {
           );
       }
 
-      const result =
-        normalizeResponse(response);
-
-      console.log(
-        "Save product response:",
-        result
-      );
-
-      if (result?.success) {
-        const message =
-          getResponseMessage(
-            response,
-            isEdit
-              ? "Product updated successfully."
-              : "Product created successfully."
-          );
-
-        setShowFormModal(false);
-
-        setEditingProduct(null);
-
-        setForm(
-          getInitialForm()
+      if (!response?.success) {
+        throw new Error(
+          response?.message ||
+            "Unable to save product."
         );
-
-        setFormErrors({});
-
-        success(message);
-
-        await loadProducts();
-
-        return;
       }
 
-      error(
-        getResponseMessage(
-          response,
-          isEdit
-            ? "Unable to update product."
-            : "Unable to create product."
-        )
-      );
+      // IMPORTANT:
+      // ToastContext expects message + type.
+      showToast({
+        type:"success",
+        message:editingProduct
+          ? "Product updated successfully."
+          : "Product created successfully.",
+        
+    });
+
+      closeFormModal();
+
+      await fetchProducts();
     } catch (err) {
       console.error(
         "Save product error:",
         err
       );
 
-      error(
-        getErrorMessage(
-          err,
-          editingProduct
-            ? "Unable to update product."
-            : "Unable to create product."
-        )
-      );
+      const message =
+        err.response?.data?.message ||
+        getErrorMessage(err) ||
+        err.message ||
+        "Unable to save product.";
+
+         showToast({
+          type: "error",
+          message:message
+        });
+     
     } finally {
       setSaving(false);
     }
   };
 
-  // ====================================================
-  // OPEN DELETE MODAL
-  // ====================================================
+  // ========================================================
+  // VIEW PRODUCT
+  // ========================================================
 
-  const openDeleteModal = (
+  const handleViewProduct = (
     product
   ) => {
-    setSelectedProduct(product);
+    setSelectedProduct(
+      normalizeProduct(product)
+    );
+
+    setShowViewModal(true);
+  };
+
+  // ========================================================
+  // DELETE PRODUCT
+  // ========================================================
+
+  const handleDeleteProduct = (
+    product
+  ) => {
+    setSelectedProduct(
+      normalizeProduct(product)
+    );
 
     setShowDeleteModal(true);
   };
 
-  // ====================================================
-  // CLOSE DELETE MODAL
-  // ====================================================
+  const confirmDeleteProduct =
+    async () => {
+      if (!selectedProduct) {
+        return;
+      }
 
-  const closeDeleteModal = () => {
-    if (deleting) {
-      return;
-    }
+      try {
+        setDeleting(true);
 
-    setShowDeleteModal(false);
-
-    setSelectedProduct(null);
-  };
-
-  // ====================================================
-  // DELETE PRODUCT
-  // ====================================================
-
-  const handleDelete = async () => {
-    if (!selectedProduct?._id) {
-      error(
-        "Product could not be identified."
-      );
-
-      return;
-    }
-
-    try {
-      setDeleting(true);
-
-      const response =
-        await productService.deleteProduct(
-          selectedProduct._id
-        );
-
-      const result =
-        normalizeResponse(response);
-
-      console.log(
-        "Delete response:",
-        result
-      );
-
-      if (result?.success) {
-        const message =
-          getResponseMessage(
-            response,
-            "Product deleted successfully."
+        const response =
+          await productService.deleteProduct(
+            getId(selectedProduct)
           );
+
+        if (!response?.success) {
+          throw new Error(
+            response?.message ||
+              "Unable to delete product."
+          );
+        }
+
+      
+        showToast({
+        type:"error",
+        message:response.message ||
+            "Product deleted successfully.",
+        
+    });
 
         setShowDeleteModal(false);
 
         setSelectedProduct(null);
-
-        success(message);
 
         if (
           products.length === 1 &&
@@ -1110,72 +1058,45 @@ const ProductPage = () => {
               previous - 1
           );
         } else {
-          await loadProducts();
+          await fetchProducts();
         }
+      } catch (err) {
+        console.error(
+          "Delete product error:",
+          err
+        );
 
-        return;
+         showToast({
+        type:"error",
+        message:err.response?.data?.message ||
+            getErrorMessage(err) ||
+            "Unable to delete product.",
+        
+    });
+
+        
+      } finally {
+        setDeleting(false);
       }
+    };
 
-      error(
-        getResponseMessage(
-          response,
-          "Unable to delete product."
-        )
-      );
-    } catch (err) {
-      console.error(
-        "Delete product error:",
-        err
-      );
+  // ========================================================
+  // CHANGE STATUS
+  // ========================================================
 
-      error(
-        getErrorMessage(
-          err,
-          "Unable to delete product."
-        )
-      );
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  // ====================================================
-  // OPEN STATUS MODAL
-  // ====================================================
-
-  const openStatusModal = (
+  const handleStatusClick = (
     product
   ) => {
-    setSelectedProduct(product);
+    setSelectedProduct(
+      normalizeProduct(product)
+    );
 
     setShowStatusModal(true);
   };
 
-  // ====================================================
-  // CLOSE STATUS MODAL
-  // ====================================================
-
-  const closeStatusModal = () => {
-    if (changingStatus) {
-      return;
-    }
-
-    setShowStatusModal(false);
-
-    setSelectedProduct(null);
-  };
-
-  // ====================================================
-  // CHANGE STATUS
-  // ====================================================
-
-  const handleStatusChange =
+  const confirmChangeStatus =
     async () => {
-      if (!selectedProduct?._id) {
-        error(
-          "Product could not be identified."
-        );
-
+      if (!selectedProduct) {
         return;
       }
 
@@ -1189,995 +1110,935 @@ const ProductPage = () => {
 
         const response =
           await productService.changeStatus(
-            selectedProduct._id,
+            getId(selectedProduct),
             newStatus
           );
 
-        const result =
-          normalizeResponse(response);
-
-        console.log(
-          "Status response:",
-          result
-        );
-
-        if (result?.success) {
-          const message =
-            getResponseMessage(
-              response,
-              newStatus
-                ? "Product activated successfully."
-                : "Product deactivated successfully."
-            );
-
-          setShowStatusModal(false);
-
-          setSelectedProduct(null);
-
-          success(message);
-
-          await loadProducts();
-
-          return;
+        if (!response?.success) {
+          throw new Error(
+            response?.message ||
+              "Unable to change product status."
+          );
         }
 
-        error(
-          getResponseMessage(
-            response,
-            "Unable to change product status."
-          )
-        );
+         showToast({
+          type: "success",
+          message:
+            response?.data?.message ||
+             response.message ||
+            "Product status updated successfully.",
+        });
+
+       
+
+        setShowStatusModal(false);
+
+        setSelectedProduct(null);
+
+        await fetchProducts();
       } catch (err) {
         console.error(
           "Change status error:",
           err
         );
 
-        error(
-          getErrorMessage(
-            err,
-            "Unable to change product status."
-          )
-        );
+         showToast({
+          type: "success",
+          message:err.response?.data?.message ||
+            getErrorMessage(err) ||
+            "Unable to change product status.",
+        });
+
+       
+
+       
       } finally {
         setChangingStatus(false);
       }
     };
 
-  // ====================================================
-  // FORMAT PRICE
-  // ====================================================
+  // ========================================================
+  // DELETE EXISTING IMAGE
+  // ========================================================
 
-  const formatPrice = (
-    price
+  const handleDeleteImage = (
+    image
   ) => {
-    return new Intl.NumberFormat(
-      "en-IN",
-      {
-        style: "currency",
-        currency: "INR",
-        maximumFractionDigits: 2,
-      }
-    ).format(
-      Number(price) || 0
-    );
+    setSelectedImage(image);
+
+    setShowImageDeleteModal(true);
   };
 
-  // ====================================================
-  // SORT LABEL
-  // ====================================================
+  const confirmDeleteImage =
+    async () => {
+      if (
+        !editingProduct ||
+        !selectedImage
+      ) {
+        return;
+      }
 
-  const getSortLabel = () => {
-    const labels = {
-      name: "Product Name",
-      sku: "SKU",
-      price: "Price",
-      stock: "Stock",
-      isActive: "Status",
-      createdAt: "Created Date",
+      try {
+        setImageActionLoading(true);
+
+        const response =
+          await productService.deleteProductImage(
+            getId(editingProduct),
+            getId(selectedImage)
+          );
+
+        if (!response?.success) {
+          throw new Error(
+            response?.message ||
+              "Unable to delete image."
+          );
+        }
+
+        if (
+          Array.isArray(
+            response.data
+          )
+        ) {
+          setExistingImages(
+            response.data
+          );
+        } else {
+          setExistingImages(
+            (previous) =>
+              previous.filter(
+                (image) =>
+                  getId(image) !==
+                  getId(
+                    selectedImage
+                  )
+              )
+          );
+        }
+
+        showToast({
+          type: "success",
+          message:response.message ||
+            "Product image deleted successfully.",
+        });
+       
+        
+
+        setShowImageDeleteModal(
+          false
+        );
+
+        setSelectedImage(null);
+
+        await fetchProducts();
+      } catch (err) {
+        console.error(
+          "Delete product image error:",
+          err
+        );
+
+         showToast({
+          type: "success",
+          message:err.response?.data?.message ||
+            getErrorMessage(err) ||
+            "Unable to delete image.",
+        });
+
+       
+      } finally {
+        setImageActionLoading(false);
+      }
     };
 
-    return (
-      labels[filters.sortBy] ||
-      "Created Date"
+  // ========================================================
+  // SET PRIMARY IMAGE
+  // ========================================================
+
+  const handleSetPrimaryImage =
+    async (image) => {
+      if (
+        !editingProduct ||
+        !image ||
+        image.isPrimary
+      ) {
+        return;
+      }
+
+      try {
+        setImageActionLoading(true);
+
+        const response =
+          await productService.setPrimaryProductImage(
+            getId(editingProduct),
+            getId(image)
+          );
+
+        if (!response?.success) {
+          throw new Error(
+            response?.message ||
+              "Unable to set primary image."
+          );
+        }
+
+        if (
+          Array.isArray(
+            response.data
+          )
+        ) {
+          setExistingImages(
+            response.data
+          );
+        } else {
+          setExistingImages(
+            (previous) =>
+              previous.map(
+                (item) => ({
+                  ...item,
+                  isPrimary:
+                    getId(item) ===
+                    getId(image),
+                })
+              )
+          );
+        }
+
+          showToast({
+          type: "success",
+          message:response.message ||
+            "Primary image updated successfully.",
+        });
+
+       
+
+        await fetchProducts();
+      } catch (err) {
+        console.error(
+          "Set primary image error:",
+          err
+        );
+
+          showToast({
+          type: "success",
+          message:err.response?.data?.message ||
+            getErrorMessage(err) ||
+            "Unable to set primary image.",
+        });
+
+        
+      } finally {
+        setImageActionLoading(false);
+      }
+    };
+
+  // ========================================================
+  // ADD MORE IMAGES
+  // ========================================================
+
+  const handleAddMoreImages = () => {
+    fileInputRef.current?.click();
+  };
+
+  // ========================================================
+  // PAGINATION
+  // ========================================================
+
+  const totalPages =
+    Number(
+      pagination.totalPages
+    ) || 0;
+
+  const handlePreviousPage = () => {
+    if (page > 1) {
+      setPage(
+        (previous) =>
+          previous - 1
+      );
+    }
+  };
+
+  const handleNextPage = () => {
+    if (
+      totalPages > 0 &&
+      page < totalPages
+    ) {
+      setPage(
+        (previous) =>
+          previous + 1
+      );
+    }
+  };
+
+  // ========================================================
+  // PAGE NUMBERS
+  // ========================================================
+
+  const getPageNumbers = () => {
+    if (totalPages <= 7) {
+      return Array.from(
+        {
+          length: totalPages,
+        },
+        (_, index) =>
+          index + 1
+      );
+    }
+
+    const pages = [];
+
+    pages.push(1);
+
+    if (page > 3) {
+      pages.push("...");
+    }
+
+    const start =
+      Math.max(2, page - 1);
+
+    const end =
+      Math.min(
+        totalPages - 1,
+        page + 1
+      );
+
+    for (
+      let number = start;
+      number <= end;
+      number++
+    ) {
+      pages.push(number);
+    }
+
+    if (
+      page <
+      totalPages - 2
+    ) {
+      pages.push("...");
+    }
+
+    pages.push(totalPages);
+
+    return pages;
+  };
+
+  // ========================================================
+  // PRODUCT PRIMARY IMAGE
+  // ========================================================
+
+  const getProductImage = (
+    product
+  ) => {
+    if (
+      !product ||
+      !Array.isArray(
+        product.images
+      ) ||
+      product.images.length === 0
+    ) {
+      return "";
+    }
+
+    const primary =
+      product.images.find(
+        (image) =>
+          image?.isPrimary
+      );
+
+    return getImageUrl(
+      primary ||
+        product.images[0]
     );
   };
 
-  // ====================================================
+  // ========================================================
+  // IMAGE COUNT
+  // ========================================================
+
+  const imageCount =
+    existingImages.length +
+    selectedFiles.length;
+
+  // ========================================================
   // RENDER
-  // ====================================================
+  // ========================================================
 
   return (
-    <div className="min-h-screen bg-gray-100 p-4 md:p-6">
-
+    <div className="space-y-6 p-4 md:p-6">
       {/* ==================================================
           HEADER
       ================================================== */}
 
-      <div className="mb-6 flex flex-col gap-4 rounded-xl bg-white p-5 shadow-sm md:flex-row md:items-center md:justify-between">
-
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">
+          <h1 className="text-2xl font-bold text-gray-900">
             Products
           </h1>
 
           <p className="mt-1 text-sm text-gray-500">
             Manage products, categories,
-            pricing and stock.
+            images and inventory.
           </p>
         </div>
 
         <button
           type="button"
-          onClick={openAddModal}
-          className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700"
+          onClick={
+            handleAddProduct
+          }
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700"
         >
-          + Add Product
-        </button>
+          <Plus size={18} />
 
+          Add Product
+        </button>
       </div>
 
       {/* ==================================================
-          SEARCH + FILTER TOOLBAR
+          FILTER CARD
       ================================================== */}
 
-      <div className="mb-5 rounded-xl bg-white p-4 shadow-sm">
-
+      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
         <form
           onSubmit={handleSearch}
-          className="flex flex-col gap-3 lg:flex-row"
+          className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7"
         >
-
           {/* SEARCH */}
 
-          <div className="flex-1">
+          <div className="xl:col-span-2">
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              Search
+            </label>
 
-            <input
-              type="text"
-              value={searchInput}
-              onChange={(e) =>
-                setSearchInput(
-                  e.target.value
-                )
-              }
-              placeholder="Search by product name or SKU..."
-              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-            />
+            <div className="relative">
+              <Search
+                size={17}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              />
 
+              <input
+                type="text"
+                value={searchInput}
+                onChange={(e) =>
+                  setSearchInput(
+                    e.target.value
+                  )
+                }
+                placeholder="Search name, SKU..."
+                className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
           </div>
 
-          {/* SEARCH BUTTON */}
+          {/* STATUS */}
 
-          <button
-            type="submit"
-            className="rounded-lg bg-gray-800 px-6 py-2.5 text-sm font-medium text-white hover:bg-gray-900"
-          >
-            Search
-          </button>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              Status
+            </label>
 
-          {/* CLEAR SEARCH */}
+            <select
+              value={
+                filters.status
+              }
+              onChange={(e) => {
+                setFilters(
+                  (previous) => ({
+                    ...previous,
+                    status:
+                      e.target.value,
+                  })
+                );
 
-          {(search ||
-            searchInput) && (
+                setPage(1);
+              }}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+            >
+              <option value="">
+                All Status
+              </option>
+
+              <option value="active">
+                Active
+              </option>
+
+              <option value="inactive">
+                Inactive
+              </option>
+            </select>
+          </div>
+
+          {/* CATEGORY */}
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              Category
+            </label>
+
+            <select
+              value={
+                filters.category
+              }
+              onChange={(e) => {
+                setFilters(
+                  (previous) => ({
+                    ...previous,
+                    category:
+                      e.target.value,
+                  })
+                );
+
+                setPage(1);
+              }}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+            >
+              <option value="">
+                All Categories
+              </option>
+
+              {categories.map(
+                (category) => (
+                  <option
+                    key={getId(
+                      category
+                    )}
+                    value={getId(
+                      category
+                    )}
+                  >
+                    {getCategoryName(
+                      category
+                    )}
+                  </option>
+                )
+              )}
+            </select>
+          </div>
+
+          {/* MIN PRICE */}
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              Min Price
+            </label>
+
+            <input
+              type="number"
+              min="0"
+              value={
+                filters.minPrice
+              }
+              onChange={(e) => {
+                setFilters(
+                  (previous) => ({
+                    ...previous,
+                    minPrice:
+                      e.target.value,
+                  })
+                );
+
+                setPage(1);
+              }}
+              placeholder="0"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+            />
+          </div>
+
+          {/* MAX PRICE */}
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              Max Price
+            </label>
+
+            <input
+              type="number"
+              min="0"
+              value={
+                filters.maxPrice
+              }
+              onChange={(e) => {
+                setFilters(
+                  (previous) => ({
+                    ...previous,
+                    maxPrice:
+                      e.target.value,
+                  })
+                );
+
+                setPage(1);
+              }}
+              placeholder="0"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+            />
+          </div>
+
+          {/* ACTIONS */}
+
+          <div className="flex items-end gap-2">
+            <button
+              type="submit"
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-800"
+            >
+              <Search size={16} />
+
+              Search
+            </button>
+
             <button
               type="button"
               onClick={
-                handleClearSearch
+                handleResetFilters
               }
-              className="rounded-lg border border-gray-300 px-6 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              title="Reset filters"
+              className="inline-flex items-center justify-center rounded-lg border border-gray-300 p-2 text-gray-600 hover:bg-gray-50"
             >
-              Clear
+              <RefreshCw
+                size={17}
+              />
             </button>
-          )}
-
-          {/* FILTER BUTTON */}
-
-          <button
-            type="button"
-            onClick={() =>
-              setShowFilters(
-                (previous) =>
-                  !previous
-              )
-            }
-            className={`relative rounded-lg border px-5 py-2.5 text-sm font-semibold transition ${
-              showFilters ||
-              activeFilterCount > 0
-                ? "border-indigo-300 bg-indigo-50 text-indigo-700"
-                : "border-gray-300 text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            <span>
-              Filters
-            </span>
-
-            {activeFilterCount >
-              0 && (
-              <span className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-indigo-600 px-1.5 text-[10px] font-bold text-white">
-                {
-                  activeFilterCount
-                }
-              </span>
-            )}
-          </button>
-
+          </div>
         </form>
-
-        {/* ==================================================
-            ADVANCED FILTER PANEL
-        ================================================== */}
-
-        {showFilters && (
-          <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
-
-            {/* FILTER HEADER */}
-
-            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-
-              <div>
-                <h3 className="text-sm font-bold text-gray-800">
-                  Advanced Filters
-                </h3>
-
-                <p className="mt-1 text-xs text-gray-500">
-                  Narrow down products
-                  using multiple
-                  conditions.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={
-                  handleResetFilters
-                }
-                className="text-xs font-semibold text-red-600 hover:text-red-700"
-              >
-                Reset Filters
-              </button>
-
-            </div>
-
-            {/* FILTER GRID */}
-
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-
-              {/* STATUS */}
-
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Status
-                </label>
-
-                <select
-                  value={
-                    filters.status
-                  }
-                  onChange={(e) =>
-                    handleFilterChange(
-                      "status",
-                      e.target.value
-                    )
-                  }
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                >
-                  <option value="all">
-                    All Status
-                  </option>
-
-                  <option value="active">
-                    Active
-                  </option>
-
-                  <option value="inactive">
-                    Inactive
-                  </option>
-                </select>
-              </div>
-
-              {/* CATEGORY */}
-
-              <div className="md:col-span-2 xl:col-span-2">
-
-                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Categories
-                </label>
-
-                <Select
-                  isMulti
-                  isClearable
-                  isLoading={
-                    categoryLoading
-                  }
-                  options={
-                    categoryFilterOptions
-                  }
-                  value={
-                    filters.categories
-                  }
-                  onChange={(selected) =>
-                    handleFilterChange(
-                      "categories",
-                      selected || []
-                    )
-                  }
-                  placeholder="Filter by categories..."
-                  closeMenuOnSelect={
-                    false
-                  }
-                  className="text-sm"
-                  classNamePrefix="filter-select"
-                />
-
-              </div>
-
-              {/* STOCK STATUS */}
-
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Stock Status
-                </label>
-
-                <select
-                  value={
-                    filters.stockStatus
-                  }
-                  onChange={(e) =>
-                    handleFilterChange(
-                      "stockStatus",
-                      e.target.value
-                    )
-                  }
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                >
-                  <option value="all">
-                    All Stock
-                  </option>
-
-                  <option value="in-stock">
-                    In Stock
-                  </option>
-
-                  <option value="low-stock">
-                    Low Stock
-                  </option>
-
-                  <option value="out-of-stock">
-                    Out of Stock
-                  </option>
-                </select>
-              </div>
-
-              {/* MIN PRICE */}
-
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Minimum Price
-                </label>
-
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={
-                    filters.minPrice
-                  }
-                  onChange={(e) =>
-                    handleFilterChange(
-                      "minPrice",
-                      e.target.value
-                    )
-                  }
-                  placeholder="₹ Min"
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                />
-              </div>
-
-              {/* MAX PRICE */}
-
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Maximum Price
-                </label>
-
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={
-                    filters.maxPrice
-                  }
-                  onChange={(e) =>
-                    handleFilterChange(
-                      "maxPrice",
-                      e.target.value
-                    )
-                  }
-                  placeholder="₹ Max"
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                />
-              </div>
-
-              {/* MIN STOCK */}
-
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Minimum Stock
-                </label>
-
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={
-                    filters.minStock
-                  }
-                  onChange={(e) =>
-                    handleFilterChange(
-                      "minStock",
-                      e.target.value
-                    )
-                  }
-                  placeholder="Min stock"
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                />
-              </div>
-
-              {/* MAX STOCK */}
-
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Maximum Stock
-                </label>
-
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={
-                    filters.maxStock
-                  }
-                  onChange={(e) =>
-                    handleFilterChange(
-                      "maxStock",
-                      e.target.value
-                    )
-                  }
-                  placeholder="Max stock"
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                />
-              </div>
-
-              {/* SORT BY */}
-
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Sort By
-                </label>
-
-                <select
-                  value={
-                    filters.sortBy
-                  }
-                  onChange={(e) =>
-                    handleFilterChange(
-                      "sortBy",
-                      e.target.value
-                    )
-                  }
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                >
-                  <option value="createdAt">
-                    Created Date
-                  </option>
-
-                  <option value="name">
-                    Product Name
-                  </option>
-
-                  <option value="sku">
-                    SKU
-                  </option>
-
-                  <option value="price">
-                    Price
-                  </option>
-
-                  <option value="stock">
-                    Stock
-                  </option>
-
-                  <option value="isActive">
-                    Status
-                  </option>
-                </select>
-              </div>
-
-              {/* SORT ORDER */}
-
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Sort Order
-                </label>
-
-                <select
-                  value={
-                    filters.sortOrder
-                  }
-                  onChange={(e) =>
-                    handleFilterChange(
-                      "sortOrder",
-                      e.target.value
-                    )
-                  }
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                >
-                  <option value="desc">
-                    Descending
-                  </option>
-
-                  <option value="asc">
-                    Ascending
-                  </option>
-                </select>
-              </div>
-
-            </div>
-
-            {/* FILTER ACTIONS */}
-
-            <div className="mt-5 flex flex-col gap-3 border-t border-gray-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
-
-              <div className="text-xs text-gray-500">
-                {activeFilterCount >
-                0 ? (
-                  <>
-                    {
-                      activeFilterCount
-                    }{" "}
-                    filter
-                    {activeFilterCount !==
-                    1
-                      ? "s"
-                      : ""}{" "}
-                    active
-                  </>
-                ) : (
-                  "No filters applied"
-                )}
-              </div>
-
-              <div className="flex gap-2">
-
-                <button
-                  type="button"
-                  onClick={
-                    handleResetFilters
-                  }
-                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-white"
-                >
-                  Reset
-                </button>
-
-                <button
-                  type="button"
-                  onClick={
-                    handleApplyFilters
-                  }
-                  className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-                >
-                  Apply Filters
-                </button>
-
-              </div>
-
-            </div>
-
-          </div>
-        )}
-
-        {/* ==================================================
-            ACTIVE FILTER SUMMARY
-        ================================================== */}
-
-        {activeFilterCount >
-          0 && (
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3">
-
-            <span className="text-xs font-semibold text-gray-500">
-              Active:
-            </span>
-
-            {filters.status !==
-              "all" && (
-              <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
-                Status:{" "}
-                {filters.status ===
-                "active"
-                  ? "Active"
-                  : "Inactive"}
-              </span>
-            )}
-
-            {filters.categories
-              .length > 0 && (
-              <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
-                Categories:{" "}
-                {
-                  filters
-                    .categories
-                    .length
-                }
-              </span>
-            )}
-
-            {filters.minPrice !==
-              "" && (
-              <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-700">
-                Min Price:{" "}
-                {formatPrice(
-                  filters.minPrice
-                )}
-              </span>
-            )}
-
-            {filters.maxPrice !==
-              "" && (
-              <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-700">
-                Max Price:{" "}
-                {formatPrice(
-                  filters.maxPrice
-                )}
-              </span>
-            )}
-
-            {filters.minStock !==
-              "" && (
-              <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-700">
-                Min Stock:{" "}
-                {
-                  filters.minStock
-                }
-              </span>
-            )}
-
-            {filters.maxStock !==
-              "" && (
-              <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-700">
-                Max Stock:{" "}
-                {
-                  filters.maxStock
-                }
-              </span>
-            )}
-
-            {filters.stockStatus !==
-              "all" && (
-              <span className="rounded-full bg-yellow-50 px-3 py-1 text-xs font-medium text-yellow-700">
-                Stock:{" "}
-                {filters.stockStatus
-                  .replace(
-                    "-",
-                    " "
-                  )
-                  .replace(
-                    /\b\w/g,
-                    (char) =>
-                      char.toUpperCase()
-                  )}
-              </span>
-            )}
-
-            {(filters.sortBy !==
-              "createdAt" ||
-              filters.sortOrder !==
-                "desc") && (
-              <span className="rounded-full bg-purple-50 px-3 py-1 text-xs font-medium text-purple-700">
-                Sort:{" "}
-                {getSortLabel()}{" "}
-                (
-                {filters.sortOrder ===
-                "asc"
-                  ? "ASC"
-                  : "DESC"}
-                )
-              </span>
-            )}
-
-          </div>
-        )}
-
       </div>
 
       {/* ==================================================
-          TABLE
+          ERROR
       ================================================== */}
 
-      <div className="overflow-hidden rounded-xl bg-white shadow-sm">
+      {error && (
+        <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <AlertCircle size={18} />
 
+          <span className="flex-1">
+            {error}
+          </span>
+
+          <button
+            type="button"
+            onClick={
+              fetchProducts
+            }
+            className="font-medium underline"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* ==================================================
+          PRODUCT TABLE
+      ================================================== */}
+
+      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
-
-          <table className="min-w-full">
-
-            <thead className="border-b bg-gray-50">
-
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
               <tr>
-
-                <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  #
-                </th>
-
-                <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Product
                 </th>
 
-                <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   SKU
                 </th>
 
-                <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Categories
                 </th>
 
-                <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Price
                 </th>
 
-                <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Stock
                 </th>
 
-                <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Status
                 </th>
 
-                <th className="px-5 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Actions
                 </th>
-
               </tr>
-
             </thead>
 
-            <tbody className="divide-y divide-gray-100">
-
-              {loading && (
+            <tbody className="divide-y divide-gray-100 bg-white">
+              {loading ? (
                 <tr>
                   <td
-                    colSpan="8"
-                    className="px-5 py-12 text-center text-sm text-gray-500"
+                    colSpan="7"
+                    className="px-4 py-16 text-center"
                   >
-                    Loading products...
+                    <div className="flex flex-col items-center justify-center gap-3 text-gray-500">
+                      <Loader2
+                        size={28}
+                        className="animate-spin"
+                      />
+
+                      <span className="text-sm">
+                        Loading
+                        products...
+                      </span>
+                    </div>
                   </td>
                 </tr>
-              )}
+              ) : products.length ===
+                0 ? (
+                <tr>
+                  <td
+                    colSpan="7"
+                    className="px-4 py-16 text-center"
+                  >
+                    <Package
+                      size={40}
+                      className="mx-auto mb-3 text-gray-300"
+                    />
 
-              {!loading &&
-                products.length ===
-                  0 && (
-                  <tr>
-                    <td
-                      colSpan="8"
-                      className="px-5 py-12 text-center"
-                    >
-                      <div className="text-gray-400">
-                        No products found.
-                      </div>
+                    <p className="text-sm font-medium text-gray-600">
+                      No products
+                      found
+                    </p>
 
-                      <button
-                        type="button"
-                        onClick={
-                          openAddModal
-                        }
-                        className="mt-3 text-sm font-medium text-indigo-600 hover:text-indigo-700"
-                      >
-                        Create your
-                        first
-                        product
-                      </button>
-                    </td>
-                  </tr>
-                )}
-
-              {!loading &&
+                    <p className="mt-1 text-xs text-gray-400">
+                      Try changing
+                      your filters
+                      or create a
+                      new product.
+                    </p>
+                  </td>
+                </tr>
+              ) : (
                 products.map(
-                  (
-                    product,
-                    index
-                  ) => (
-                    <tr
-                      key={
-                        product._id
-                      }
-                      className="transition hover:bg-gray-50"
-                    >
+                  (product) => {
+                    const imageUrl =
+                      getProductImage(
+                        product
+                      );
 
-                      {/* NUMBER */}
-
-                      <td className="whitespace-nowrap px-5 py-4 text-sm text-gray-500">
-                        {(page - 1) *
-                          limit +
-                          index +
-                          1}
-                      </td>
-
-                      {/* PRODUCT */}
-
-                      <td className="px-5 py-4">
-
-                        <div className="font-medium text-gray-800">
-                          {
-                            product.name
-                          }
-                        </div>
-
-                        {product.description && (
-                          <div className="mt-1 max-w-xs truncate text-xs text-gray-400">
-                            {
-                              product.description
-                            }
-                          </div>
+                    return (
+                      <tr
+                        key={getId(
+                          product
                         )}
+                        className="transition hover:bg-gray-50"
+                      >
+                        {/* PRODUCT */}
 
-                      </td>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-gray-100">
+                              {imageUrl ? (
+                                <img
+                                  src={
+                                    imageUrl
+                                  }
+                                  alt={
+                                    product.name
+                                  }
+                                  className="h-full w-full object-cover"
+                                  onError={(
+                                    e
+                                  ) => {
+                                    e.currentTarget.style.display =
+                                      "none";
+                                  }}
+                                />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-gray-400">
+                                  <ImageIcon
+                                    size={
+                                      20
+                                    }
+                                  />
+                                </div>
+                              )}
+                            </div>
 
-                      {/* SKU */}
-
-                      <td className="whitespace-nowrap px-5 py-4 text-sm font-medium text-gray-600">
-                        {
-                          product.sku
-                        }
-                      </td>
-
-                      {/* CATEGORIES */}
-
-                      <td className="px-5 py-4">
-
-                        <div className="flex max-w-xs flex-wrap gap-1">
-
-                          {(
-                            product.categories ||
-                            []
-                          ).map(
-                            (
-                              category
-                            ) => (
-                              <span
-                                key={
-                                  category._id
-                                }
-                                className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700"
-                              >
+                            <div>
+                              <p className="max-w-[220px] truncate text-sm font-semibold text-gray-900">
                                 {
-                                  category.name
+                                  product.name
                                 }
+                              </p>
+
+                              <p className="mt-0.5 text-xs text-gray-400">
+                                {Array.isArray(
+                                  product.images
+                                )
+                                  ? product
+                                      .images
+                                      .length
+                                  : 0}{" "}
+                                image
+                                {Array.isArray(
+                                  product.images
+                                ) &&
+                                product
+                                  .images
+                                  .length !==
+                                  1
+                                  ? "s"
+                                  : ""}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* SKU */}
+
+                        <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-700">
+                          {
+                            product.sku
+                          }
+                        </td>
+
+                        {/* CATEGORIES */}
+
+                        <td className="px-4 py-3">
+                          <div className="flex max-w-[220px] flex-wrap gap-1">
+                            {product.categories
+                              ?.length ? (
+                              product.categories.map(
+                                (
+                                  category
+                                ) => (
+                                  <span
+                                    key={getId(
+                                      category
+                                    )}
+                                    className="rounded-full bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700"
+                                  >
+                                    {getCategoryName(
+                                      category
+                                    )}
+                                  </span>
+                                )
+                              )
+                            ) : (
+                              <span className="text-xs text-gray-400">
+                                No
+                                category
                               </span>
-                            )
+                            )}
+                          </div>
+                        </td>
+
+                        {/* PRICE */}
+
+                        <td className="whitespace-nowrap px-4 py-3 text-sm font-semibold text-gray-800">
+                          {formatCurrency(
+                            product.price
                           )}
+                        </td>
 
-                        </div>
+                        {/* STOCK */}
 
-                      </td>
-
-                      {/* PRICE */}
-
-                      <td className="whitespace-nowrap px-5 py-4 text-sm font-semibold text-gray-700">
-                        {formatPrice(
-                          product.price
-                        )}
-                      </td>
-
-                      {/* STOCK */}
-
-                      <td className="whitespace-nowrap px-5 py-4">
-
-                        <span
-                          className={`text-sm font-semibold ${
-                            Number(
-                              product.stock
-                            ) ===
-                            0
-                              ? "text-red-600"
-                              : Number(
+                        <td className="whitespace-nowrap px-4 py-3">
+                          <span
+                            className={`text-sm font-semibold ${
+                              Number(
+                                product.stock
+                              ) ===
+                              0
+                                ? "text-red-600"
+                                : Number(
                                     product.stock
                                   ) <=
                                   10
-                              ? "text-orange-600"
-                              : "text-gray-600"
-                          }`}
-                        >
-                          {
-                            product.stock
-                          }
-                        </span>
-
-                        {Number(
-                          product.stock
-                        ) === 0 && (
-                          <span className="ml-2 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-600">
-                            Out
+                                ? "text-amber-600"
+                                : "text-green-600"
+                            }`}
+                          >
+                            {
+                              product.stock
+                            }
                           </span>
-                        )}
+                        </td>
 
-                        {Number(
-                          product.stock
-                        ) > 0 &&
-                          Number(
-                            product.stock
-                          ) <= 10 && (
-                            <span className="ml-2 rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-semibold text-orange-600">
-                              Low
-                            </span>
-                          )}
+                        {/* STATUS */}
 
-                      </td>
-
-                      {/* STATUS */}
-
-                      <td className="whitespace-nowrap px-5 py-4">
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openStatusModal(
-                              product
-                            )
-                          }
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                            product.isActive
-                              ? "bg-green-100 text-green-700"
-                              : "bg-red-100 text-red-700"
-                          }`}
-                        >
-                          {product.isActive
-                            ? "Active"
-                            : "Inactive"}
-                        </button>
-
-                      </td>
-
-                      {/* ACTIONS */}
-
-                      <td className="whitespace-nowrap px-5 py-4">
-
-                        <div className="flex justify-end gap-2">
-
+                        <td className="whitespace-nowrap px-4 py-3">
                           <button
                             type="button"
                             onClick={() =>
-                              openEditModal(
+                              handleStatusClick(
                                 product
                               )
                             }
-                            className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                              product.isActive
+                                ? "bg-green-100 text-green-700 hover:bg-green-200"
+                                : "bg-red-100 text-red-700 hover:bg-red-200"
+                            }`}
                           >
-                            Edit
+                            {product.isActive
+                              ? "Active"
+                              : "Inactive"}
                           </button>
+                        </td>
 
-                          <button
-                            type="button"
-                            onClick={() =>
-                              openDeleteModal(
-                                product
-                              )
-                            }
-                            className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
-                          >
-                            Delete
-                          </button>
+                        {/* ACTIONS */}
 
-                        </div>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          <div className="flex justify-end gap-1">
+                            <button
+                              type="button"
+                              title="View"
+                              onClick={() =>
+                                handleViewProduct(
+                                  product
+                                )
+                              }
+                              className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                            >
+                              <Eye
+                                size={
+                                  17
+                                }
+                              />
+                            </button>
 
-                      </td>
+                            <button
+                              type="button"
+                              title="Edit"
+                              onClick={() =>
+                                handleEditProduct(
+                                  product
+                                )
+                              }
+                              className="rounded-lg p-2 text-blue-600 hover:bg-blue-50"
+                            >
+                              <Pencil
+                                size={
+                                  17
+                                }
+                              />
+                            </button>
 
-                    </tr>
-                  )
-                )}
-
+                            <button
+                              type="button"
+                              title="Delete"
+                              onClick={() =>
+                                handleDeleteProduct(
+                                  product
+                                )
+                              }
+                              className="rounded-lg p-2 text-red-600 hover:bg-red-50"
+                            >
+                              <Trash2
+                                size={
+                                  17
+                                }
+                              />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+                )
+              )}
             </tbody>
-
           </table>
-
         </div>
 
         {/* ==================================================
@@ -2186,187 +2047,129 @@ const ProductPage = () => {
 
         {!loading &&
           products.length > 0 && (
-            <div className="flex flex-col gap-3 border-t px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-
+            <div className="flex flex-col gap-3 border-t border-gray-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-sm text-gray-500">
-
                 Showing{" "}
-
                 <span className="font-medium text-gray-700">
                   {(page - 1) *
-                    limit +
+                    PAGE_LIMIT +
                     1}
-                </span>
-
-                {" "}to{" "}
-
+                </span>{" "}
+                to{" "}
                 <span className="font-medium text-gray-700">
                   {Math.min(
-                    page * limit,
+                    page *
+                      PAGE_LIMIT,
                     pagination.total
                   )}
-                </span>
-
-                {" "}of{" "}
-
+                </span>{" "}
+                of{" "}
                 <span className="font-medium text-gray-700">
                   {
                     pagination.total
                   }
-                </span>
-
+                </span>{" "}
+                products
               </div>
 
               <div className="flex items-center gap-1">
-
                 <button
                   type="button"
                   disabled={
                     page <= 1
                   }
-                  onClick={() =>
-                    setPage(
-                      (previous) =>
-                        Math.max(
-                          previous - 1,
-                          1
-                        )
-                    )
+                  onClick={
+                    handlePreviousPage
                   }
-                  className="rounded-lg border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-lg border border-gray-300 p-2 text-gray-600 disabled:cursor-not-allowed disabled:opacity-40 hover:bg-gray-50"
                 >
-                  Previous
+                  <ChevronLeft
+                    size={17}
+                  />
                 </button>
 
-                {Array.from(
-                  {
-                    length:
-                      pagination.totalPages,
-                  },
-                  (_, index) =>
-                    index + 1
-                )
-                  .filter(
-                    (pageNumber) =>
-                      pageNumber ===
-                        1 ||
-                      pageNumber ===
-                        pagination.totalPages ||
-                      Math.abs(
-                        pageNumber -
-                          page
-                      ) <= 1
-                  )
-                  .map(
-                    (
-                      pageNumber,
-                      index,
-                      array
-                    ) => {
-
-                      const previous =
-                        array[
-                          index - 1
-                        ];
-
-                      const showDots =
-                        previous &&
-                        pageNumber -
-                          previous >
-                          1;
-
-                      return (
-                        <div
-                          key={
+                {getPageNumbers().map(
+                  (
+                    pageNumber,
+                    index
+                  ) =>
+                    pageNumber ===
+                    "..." ? (
+                      <span
+                        key={`dots-${index}`}
+                        className="px-2 text-gray-400"
+                      >
+                        ...
+                      </span>
+                    ) : (
+                      <button
+                        key={
+                          pageNumber
+                        }
+                        type="button"
+                        onClick={() =>
+                          setPage(
                             pageNumber
-                          }
-                          className="flex"
-                        >
-
-                          {showDots && (
-                            <span className="px-2 py-2 text-gray-400">
-                              ...
-                            </span>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setPage(
-                                pageNumber
-                              )
-                            }
-                            className={`rounded-lg px-3 py-2 text-sm ${
-                              page ===
-                              pageNumber
-                                ? "bg-indigo-600 text-white"
-                                : "border text-gray-700 hover:bg-gray-50"
-                            }`}
-                          >
-                            {
-                              pageNumber
-                            }
-                          </button>
-
-                        </div>
-                      );
-                    }
-                  )}
+                          )
+                        }
+                        className={`min-w-9 rounded-lg px-3 py-2 text-sm ${
+                          page ===
+                          pageNumber
+                            ? "bg-blue-600 font-semibold text-white"
+                            : "text-gray-600 hover:bg-gray-100"
+                        }`}
+                      >
+                        {
+                          pageNumber
+                        }
+                      </button>
+                    )
+                )}
 
                 <button
                   type="button"
                   disabled={
+                    totalPages ===
+                      0 ||
                     page >=
-                    pagination.totalPages
+                      totalPages
                   }
-                  onClick={() =>
-                    setPage(
-                      (previous) =>
-                        Math.min(
-                          previous + 1,
-                          pagination.totalPages
-                        )
-                    )
+                  onClick={
+                    handleNextPage
                   }
-                  className="rounded-lg border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-lg border border-gray-300 p-2 text-gray-600 disabled:cursor-not-allowed disabled:opacity-40 hover:bg-gray-50"
                 >
-                  Next
+                  <ChevronRight
+                    size={17}
+                  />
                 </button>
-
               </div>
-
             </div>
           )}
-
       </div>
 
       {/* ==================================================
-          ADD / EDIT MODAL
+          PRODUCT FORM MODAL
       ================================================== */}
 
       {showFormModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
-
+          <div className="flex max-h-[95vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             {/* HEADER */}
 
-            <div className="flex items-center justify-between border-b px-6 py-5">
-
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
               <div>
-
-                <h2 className="text-xl font-bold text-gray-800">
+                <h2 className="text-lg font-bold text-gray-900">
                   {editingProduct
                     ? "Edit Product"
                     : "Add Product"}
                 </h2>
 
-                <p className="mt-1 text-sm text-gray-500">
+                <p className="mt-0.5 text-xs text-gray-500">
                   {editingProduct
-                    ? "Update product information."
-                    : "Create a new product."}
+                    ? "Update product information and images."
+                    : "Create a new product with multiple images."}
                 </p>
-
               </div>
 
               <button
@@ -2375,398 +2178,938 @@ const ProductPage = () => {
                   closeFormModal
                 }
                 disabled={saving}
-                className="text-2xl text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 disabled:opacity-50"
               >
-                ×
+                <X size={20} />
               </button>
-
             </div>
 
-            {/* FORM */}
+            {/* BODY */}
 
             <form
               onSubmit={
                 handleSubmit
               }
-              className="space-y-5 p-6"
-              encType="multipart/form-data"
+              className="overflow-y-auto"
             >
+              <div className="grid grid-cols-1 gap-6 p-5 lg:grid-cols-3">
+                {/* LEFT */}
 
-              {/* PRODUCT NAME */}
+                <div className="space-y-4 lg:col-span-2">
+                  {/* NAME */}
 
-              <div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                      Product Name{" "}
+                      <span className="text-red-500">
+                        *
+                      </span>
+                    </label>
 
-                <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                  Product Name
-                  <span className="text-red-500">
-                    {" "}*
-                  </span>
-                </label>
-
-                <input
-                  type="text"
-                  name="name"
-                  value={
-                    form.name
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  disabled={saving}
-                  placeholder="Enter product name"
-                  className={`w-full rounded-lg border px-4 py-2.5 text-sm outline-none focus:ring-2 disabled:bg-gray-100 ${
-                    formErrors.name
-                      ? "border-red-400 focus:border-red-500 focus:ring-red-100"
-                      : "border-gray-300 focus:border-indigo-500 focus:ring-indigo-100"
-                  }`}
-                />
-
-                {formErrors.name && (
-                  <p className="mt-1 text-xs text-red-600">
-                    {
-                      formErrors.name
-                    }
-                  </p>
-                )}
-
-              </div>
-
-              {/* SKU */}
-
-              <div>
-
-                <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                  SKU
-                  <span className="text-red-500">
-                    {" "}*
-                  </span>
-                </label>
-
-                <input
-                  type="text"
-                  name="sku"
-                  value={
-                    form.sku
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  disabled={saving}
-                  placeholder="e.g. IPHONE-15"
-                  className={`w-full rounded-lg border px-4 py-2.5 text-sm uppercase outline-none focus:ring-2 disabled:bg-gray-100 ${
-                    formErrors.sku
-                      ? "border-red-400 focus:border-red-500 focus:ring-red-100"
-                      : "border-gray-300 focus:border-indigo-500 focus:ring-indigo-100"
-                  }`}
-                />
-
-                {formErrors.sku && (
-                  <p className="mt-1 text-xs text-red-600">
-                    {
-                      formErrors.sku
-                    }
-                  </p>
-                )}
-
-              </div>
-
-              {/* CATEGORIES */}
-
-              <div>
-
-                <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                  Categories
-                  <span className="text-red-500">
-                    {" "}*
-                  </span>
-                </label>
-
-                <Select
-                  isMulti
-                  isLoading={
-                    categoryLoading
-                  }
-                  options={
-                    categories
-                  }
-                  value={
-                    form.categories
-                  }
-                  onChange={
-                    handleCategoryChange
-                  }
-                  placeholder="Select categories..."
-                  closeMenuOnSelect={
-                    false
-                  }
-                  isDisabled={
-                    saving
-                  }
-                  className="text-sm"
-                  classNamePrefix="product-select"
-                />
-
-                {formErrors.categories && (
-                  <p className="mt-1 text-xs text-red-600">
-                    {
-                      formErrors.categories
-                    }
-                  </p>
-                )}
-
-              </div>
-
-              {/* PRICE / STOCK */}
-
-              <div className="grid gap-5 md:grid-cols-2">
-
-                {/* PRICE */}
-
-                <div>
-
-                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                    Price
-                    <span className="text-red-500">
-                      {" "}*
-                    </span>
-                  </label>
-
-                  <input
-                    type="number"
-                    name="price"
-                    value={
-                      form.price
-                    }
-                    onChange={
-                      handleChange
-                    }
-                    disabled={saving}
-                    min="0"
-                    step="0.01"
-                    placeholder="0.00"
-                    className={`w-full rounded-lg border px-4 py-2.5 text-sm outline-none focus:ring-2 disabled:bg-gray-100 ${
-                      formErrors.price
-                        ? "border-red-400 focus:border-red-500 focus:ring-red-100"
-                        : "border-gray-300 focus:border-indigo-500 focus:ring-indigo-100"
-                    }`}
-                  />
-
-                  {formErrors.price && (
-                    <p className="mt-1 text-xs text-red-600">
-                      {
-                        formErrors.price
+                    <input
+                      type="text"
+                      name="name"
+                      value={
+                        form.name
                       }
-                    </p>
-                  )}
+                      onChange={
+                        handleInputChange
+                      }
+                      placeholder="Enter product name"
+                      className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none focus:ring-2 ${
+                        formErrors.name
+                          ? "border-red-400 focus:ring-red-100"
+                          : "border-gray-300 focus:border-blue-500 focus:ring-blue-100"
+                      }`}
+                    />
 
+                    {formErrors.name && (
+                      <p className="mt-1 text-xs text-red-600">
+                        {
+                          formErrors.name
+                        }
+                      </p>
+                    )}
+                  </div>
+
+                  {/* SKU */}
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                      SKU{" "}
+                      <span className="text-red-500">
+                        *
+                      </span>
+                    </label>
+
+                    <input
+                      type="text"
+                      name="sku"
+                      value={
+                        form.sku
+                      }
+                      onChange={
+                        handleInputChange
+                      }
+                      placeholder="PRODUCT-001"
+                      className={`w-full rounded-lg border px-3 py-2.5 text-sm uppercase outline-none focus:ring-2 ${
+                        formErrors.sku
+                          ? "border-red-400 focus:ring-red-100"
+                          : "border-gray-300 focus:border-blue-500 focus:ring-blue-100"
+                      }`}
+                    />
+
+                    {formErrors.sku && (
+                      <p className="mt-1 text-xs text-red-600">
+                        {
+                          formErrors.sku
+                        }
+                      </p>
+                    )}
+                  </div>
+
+                  {/* PRICE / STOCK */}
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                        Price{" "}
+                        <span className="text-red-500">
+                          *
+                        </span>
+                      </label>
+
+                      <input
+                        type="number"
+                        name="price"
+                        min="0"
+                        step="0.01"
+                        value={
+                          form.price
+                        }
+                        onChange={
+                          handleInputChange
+                        }
+                        placeholder="0.00"
+                        className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none focus:ring-2 ${
+                          formErrors.price
+                            ? "border-red-400 focus:ring-red-100"
+                            : "border-gray-300 focus:border-blue-500 focus:ring-blue-100"
+                        }`}
+                      />
+
+                      {formErrors.price && (
+                        <p className="mt-1 text-xs text-red-600">
+                          {
+                            formErrors.price
+                          }
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                        Stock{" "}
+                        <span className="text-red-500">
+                          *
+                        </span>
+                      </label>
+
+                      <input
+                        type="number"
+                        name="stock"
+                        min="0"
+                        step="1"
+                        value={
+                          form.stock
+                        }
+                        onChange={
+                          handleInputChange
+                        }
+                        placeholder="0"
+                        className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none focus:ring-2 ${
+                          formErrors.stock
+                            ? "border-red-400 focus:ring-red-100"
+                            : "border-gray-300 focus:border-blue-500 focus:ring-blue-100"
+                        }`}
+                      />
+
+                      {formErrors.stock && (
+                        <p className="mt-1 text-xs text-red-600">
+                          {
+                            formErrors.stock
+                          }
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* CATEGORIES */}
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                      Categories{" "}
+                      <span className="text-red-500">
+                        *
+                      </span>
+                    </label>
+
+                    <div className="max-h-40 overflow-y-auto rounded-lg border border-gray-300 p-2">
+                      {categoriesLoading ? (
+                        <div className="flex items-center gap-2 p-3 text-sm text-gray-500">
+                          <Loader2
+                            size={16}
+                            className="animate-spin"
+                          />
+
+                          Loading
+                          categories...
+                        </div>
+                      ) : categories.length ===
+                        0 ? (
+                        <div className="p-3 text-sm text-gray-500">
+                          No active
+                          categories
+                          available.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                          {categories.map(
+                            (
+                              category
+                            ) => {
+                              const categoryId =
+                                getId(
+                                  category
+                                );
+
+                              const selected =
+                                form.categories.includes(
+                                  categoryId
+                                );
+
+                              return (
+                                <label
+                                  key={
+                                    categoryId
+                                  }
+                                  className={`flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm transition ${
+                                    selected
+                                      ? "bg-blue-50 text-blue-700"
+                                      : "text-gray-700 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      selected
+                                    }
+                                    onChange={() =>
+                                      handleCategoryChange(
+                                        categoryId
+                                      )
+                                    }
+                                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                  />
+
+                                  <span>
+                                    {getCategoryName(
+                                      category
+                                    )}
+                                  </span>
+                                </label>
+                              );
+                            }
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {formErrors.categories && (
+                      <p className="mt-1 text-xs text-red-600">
+                        {
+                          formErrors.categories
+                        }
+                      </p>
+                    )}
+
+                    <p className="mt-1 text-xs text-gray-400">
+                      Select one or more
+                      categories.
+                    </p>
+                  </div>
+
+                  {/* DESCRIPTION */}
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                      Description
+                    </label>
+
+                    <textarea
+                      name="description"
+                      rows="5"
+                      value={
+                        form.description
+                      }
+                      onChange={
+                        handleInputChange
+                      }
+                      placeholder="Enter product description..."
+                      className="w-full resize-none rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
+
+                  {/* STATUS */}
+
+                  <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      name="isActive"
+                      checked={
+                        form.isActive
+                      }
+                      onChange={
+                        handleInputChange
+                      }
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+
+                    <div>
+                      <p className="text-sm font-medium text-gray-800">
+                        Active Product
+                      </p>
+
+                      <p className="text-xs text-gray-500">
+                        Product will be
+                        available as an
+                        active product.
+                      </p>
+                    </div>
+                  </label>
                 </div>
 
-                {/* STOCK */}
+                {/* RIGHT IMAGE SECTION */}
 
-                <div>
+                <div className="space-y-4">
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <label className="text-sm font-medium text-gray-700">
+                        Product Images{" "}
+                        <span className="text-red-500">
+                          *
+                        </span>
+                      </label>
 
-                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                    Stock
-                    <span className="text-red-500">
-                      {" "}*
-                    </span>
-                  </label>
+                      <span className="text-xs text-gray-400">
+                        {imageCount}
+                        /10
+                      </span>
+                    </div>
 
-                  <input
-                    type="number"
-                    name="stock"
-                    value={
-                      form.stock
-                    }
-                    onChange={
-                      handleChange
-                    }
-                    disabled={saving}
-                    min="0"
-                    step="1"
-                    placeholder="0"
-                    className={`w-full rounded-lg border px-4 py-2.5 text-sm outline-none focus:ring-2 disabled:bg-gray-100 ${
-                      formErrors.stock
-                        ? "border-red-400 focus:border-red-500 focus:ring-red-100"
-                        : "border-gray-300 focus:border-indigo-500 focus:ring-indigo-100"
-                    }`}
-                  />
+                    {/* EXISTING */}
 
-                  {formErrors.stock && (
-                    <p className="mt-1 text-xs text-red-600">
-                      {
-                        formErrors.stock
+                    {existingImages.length >
+                      0 && (
+                      <div className="mb-3">
+                        <p className="mb-2 text-xs font-medium text-gray-500">
+                          Existing Images
+                        </p>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          {existingImages.map(
+                            (image) => (
+                              <div
+                                key={getId(
+                                  image
+                                )}
+                                className="group relative overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
+                              >
+                                <img
+                                  src={getImageUrl(
+                                    image
+                                  )}
+                                  alt={
+                                    image.originalName ||
+                                    "Product"
+                                  }
+                                  className="aspect-square w-full object-cover"
+                                  onError={(
+                                    e
+                                  ) => {
+                                    e.currentTarget.style.display =
+                                      "none";
+                                  }}
+                                />
+
+                                {image.isPrimary && (
+                                  <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-1 rounded-full bg-yellow-400 px-2 py-1 text-[10px] font-bold text-yellow-900 shadow">
+                                    <Star
+                                      size={
+                                        10
+                                      }
+                                      fill="currentColor"
+                                    />
+
+                                    Primary
+                                  </span>
+                                )}
+
+                                <div className="absolute inset-x-0 bottom-0 flex translate-y-full items-center justify-between gap-1 bg-black/70 p-1.5 transition group-hover:translate-y-0">
+                                  {!image.isPrimary && (
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        imageActionLoading
+                                      }
+                                      onClick={() =>
+                                        handleSetPrimaryImage(
+                                          image
+                                        )
+                                      }
+                                      className="flex flex-1 items-center justify-center gap-1 rounded bg-white/10 px-2 py-1 text-[10px] font-medium text-white hover:bg-white/20 disabled:opacity-50"
+                                    >
+                                      <Star
+                                        size={
+                                          12
+                                        }
+                                      />
+
+                                      Primary
+                                    </button>
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    disabled={
+                                      imageActionLoading
+                                    }
+                                    onClick={() =>
+                                      handleDeleteImage(
+                                        image
+                                      )
+                                    }
+                                    className="flex items-center justify-center rounded bg-red-500/80 px-2 py-1 text-[10px] font-medium text-white hover:bg-red-500 disabled:opacity-50"
+                                  >
+                                    <Trash2
+                                      size={
+                                        12
+                                      }
+                                    />
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* NEW PREVIEWS */}
+
+                    {previewImages.length >
+                      0 && (
+                      <div className="mb-3">
+                        <p className="mb-2 text-xs font-medium text-gray-500">
+                          New Images
+                        </p>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          {previewImages.map(
+                            (
+                              preview,
+                              index
+                            ) => (
+                              <div
+                                key={
+                                  preview.id
+                                }
+                                className="group relative overflow-hidden rounded-lg border border-blue-200 bg-blue-50"
+                              >
+                                <img
+                                  src={
+                                    preview.url
+                                  }
+                                  alt="Preview"
+                                  className="aspect-square w-full object-cover"
+                                />
+
+                                {index ===
+                                  0 &&
+                                  existingImages.length ===
+                                    0 && (
+                                    <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-1 rounded-full bg-yellow-400 px-2 py-1 text-[10px] font-bold text-yellow-900">
+                                      <Star
+                                        size={
+                                          10
+                                        }
+                                        fill="currentColor"
+                                      />
+
+                                      Primary
+                                    </span>
+                                  )}
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleRemoveSelectedImage(
+                                      index
+                                    )
+                                  }
+                                  className="absolute right-1.5 top-1.5 rounded-full bg-red-600 p-1 text-white shadow hover:bg-red-700"
+                                >
+                                  <X
+                                    size={
+                                      12
+                                    }
+                                  />
+                                </button>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* UPLOAD */}
+
+                    {imageCount <
+                      MAX_IMAGES && (
+                      <button
+                        type="button"
+                        onClick={
+                          handleAddMoreImages
+                        }
+                        className="flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center transition hover:border-blue-400 hover:bg-blue-50"
+                      >
+                        <Upload
+                          size={28}
+                          className="mb-2 text-gray-400"
+                        />
+
+                        <span className="text-sm font-medium text-gray-700">
+                          Click to
+                          upload
+                        </span>
+
+                        <span className="mt-1 text-xs text-gray-400">
+                          JPG, PNG,
+                          WEBP · Max
+                          5 MB each
+                        </span>
+
+                        <span className="mt-1 text-xs text-gray-400">
+                          Up to 10
+                          images
+                        </span>
+                      </button>
+                    )}
+
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept="image/jpeg,image/jpg,image/png,image/webp"
+                      onChange={
+                        handleFileChange
                       }
-                    </p>
-                  )}
+                      className="hidden"
+                    />
 
+                    {formErrors.images && (
+                      <p className="mt-1 text-xs text-red-600">
+                        {
+                          formErrors.images
+                        }
+                      </p>
+                    )}
+                  </div>
+
+                  {/* IMAGE INFORMATION */}
+
+                  <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
+                    <div className="flex gap-2">
+                      <ImageIcon
+                        size={16}
+                        className="mt-0.5 text-blue-600"
+                      />
+
+                      <div>
+                        <p className="text-xs font-semibold text-blue-800">
+                          Image
+                          information
+                        </p>
+
+                        <ul className="mt-1 space-y-1 text-[11px] text-blue-700">
+                          <li>
+                            • Maximum
+                            10 images
+                          </li>
+
+                          <li>
+                            • Maximum
+                            5 MB per
+                            image
+                          </li>
+
+                          <li>
+                            • First
+                            image
+                            becomes
+                            primary
+                          </li>
+
+                          <li>
+                            • You can
+                            change
+                            the
+                            primary
+                            image
+                            later
+                          </li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-
-              </div>
-
-              {/* DESCRIPTION */}
-
-              <div>
-
-                <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                  Description
-                </label>
-
-                <textarea
-                  name="description"
-                  value={
-                    form.description
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  disabled={saving}
-                  rows="4"
-                  placeholder="Enter product description..."
-                  className="w-full resize-none rounded-lg border border-gray-300 px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-gray-100"
-                />
-
-              </div>
-
-              {/* STATUS */}
-
-              <div className="flex items-center gap-3">
-
-                <input
-                  type="checkbox"
-                  id="product-status"
-                  name="isActive"
-                  checked={
-                    form.isActive
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  disabled={
-                    saving
-                  }
-                  className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                />
-
-                <label
-                  htmlFor="product-status"
-                  className="text-sm font-medium text-gray-700"
-                >
-                  Active Product
-                </label>
-
               </div>
 
               {/* FOOTER */}
 
-              <div className="flex justify-end gap-3 border-t pt-5">
-
+              <div className="flex items-center justify-end gap-3 border-t border-gray-200 bg-gray-50 px-5 py-4">
                 <button
                   type="button"
+                  disabled={saving}
                   onClick={
                     closeFormModal
                   }
-                  disabled={
-                    saving
-                  }
-                  className="rounded-lg border border-gray-300 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                 >
                   Cancel
                 </button>
 
                 <button
                   type="submit"
-                  disabled={
-                    saving
-                  }
-                  className="rounded-lg bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={saving}
+                  className="inline-flex min-w-[130px] items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {saving
-                    ? "Saving..."
-                    : editingProduct
-                    ? "Update Product"
-                    : "Create Product"}
+                  {saving ? (
+                    <>
+                      <Loader2
+                        size={17}
+                        className="animate-spin"
+                      />
+
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Check
+                        size={17}
+                      />
+
+                      {editingProduct
+                        ? "Update Product"
+                        : "Create Product"}
+                    </>
+                  )}
                 </button>
-
               </div>
-
             </form>
-
           </div>
-
         </div>
       )}
 
       {/* ==================================================
-          DELETE MODAL
+          VIEW PRODUCT MODAL
+      ================================================== */}
+
+      {showViewModal &&
+        selectedProduct && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+              <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">
+                    Product Details
+                  </h2>
+
+                  <p className="text-xs text-gray-500">
+                    View product
+                    information
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowViewModal(
+                      false
+                    )
+                  }
+                  className="rounded-lg p-2 text-gray-500 hover:bg-gray-100"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-6 p-5 lg:grid-cols-2">
+                {/* IMAGES */}
+
+                <div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {selectedProduct.images
+                      ?.length ? (
+                      selectedProduct.images.map(
+                        (image) => (
+                          <div
+                            key={getId(
+                              image
+                            )}
+                            className="relative overflow-hidden rounded-xl border border-gray-200"
+                          >
+                            <img
+                              src={getImageUrl(
+                                image
+                              )}
+                              alt={
+                                image.originalName ||
+                                selectedProduct.name
+                              }
+                              className="aspect-square w-full object-cover"
+                              onError={(
+                                e
+                              ) => {
+                                e.currentTarget.style.display =
+                                  "none";
+                              }}
+                            />
+
+                            {image.isPrimary && (
+                              <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-yellow-400 px-2 py-1 text-xs font-semibold text-yellow-900">
+                                <Star
+                                  size={
+                                    12
+                                  }
+                                  fill="currentColor"
+                                />
+
+                                Primary
+                              </span>
+                            )}
+                          </div>
+                        )
+                      )
+                    ) : (
+                      <div className="col-span-2 flex aspect-video items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-400">
+                        <ImageIcon
+                          size={40}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* DETAILS */}
+
+                <div className="space-y-5">
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+                      Product Name
+                    </p>
+
+                    <p className="mt-1 text-xl font-bold text-gray-900">
+                      {
+                        selectedProduct.name
+                      }
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+                        SKU
+                      </p>
+
+                      <p className="mt-1 text-sm font-semibold text-gray-800">
+                        {
+                          selectedProduct.sku
+                        }
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+                        Status
+                      </p>
+
+                      <span
+                        className={`mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                          selectedProduct.isActive
+                            ? "bg-green-100 text-green-700"
+                            : "bg-red-100 text-red-700"
+                        }`}
+                      >
+                        {selectedProduct.isActive
+                          ? "Active"
+                          : "Inactive"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="rounded-xl bg-gray-50 p-4">
+                      <p className="text-xs text-gray-500">
+                        Price
+                      </p>
+
+                      <p className="mt-1 text-lg font-bold text-gray-900">
+                        {formatCurrency(
+                          selectedProduct.price
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl bg-gray-50 p-4">
+                      <p className="text-xs text-gray-500">
+                        Stock
+                      </p>
+
+                      <p className="mt-1 text-lg font-bold text-gray-900">
+                        {
+                          selectedProduct.stock
+                        }
+                      </p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+                      Categories
+                    </p>
+
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {selectedProduct.categories
+                        ?.length ? (
+                        selectedProduct.categories.map(
+                          (
+                            category
+                          ) => (
+                            <span
+                              key={getId(
+                                category
+                              )}
+                              className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700"
+                            >
+                              {getCategoryName(
+                                category
+                              )}
+                            </span>
+                          )
+                        )
+                      ) : (
+                        <span className="text-sm text-gray-400">
+                          No
+                          categories
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+                      Description
+                    </p>
+
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-600">
+                      {selectedProduct.description ||
+                        "No description available."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end border-t border-gray-200 bg-gray-50 px-5 py-4">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowViewModal(
+                      false
+                    )
+                  }
+                  className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+      {/* ==================================================
+          DELETE PRODUCT MODAL
       ================================================== */}
 
       {showDeleteModal &&
         selectedProduct && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
-
-            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-
-              <div className="mb-5">
-
-                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-xl font-bold text-red-600">
-                  !
+            <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+              <div className="p-5">
+                <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-full bg-red-100 text-red-600">
+                  <Trash2 size={21} />
                 </div>
 
-                <h2 className="text-xl font-bold text-gray-800">
+                <h3 className="text-lg font-bold text-gray-900">
                   Delete Product?
-                </h2>
+                </h3>
 
                 <p className="mt-2 text-sm leading-6 text-gray-500">
-                  Are you sure you want
-                  to delete{" "}
-                  <span className="font-semibold text-gray-700">
+                  Are you sure you
+                  want to delete{" "}
+                  <span className="font-semibold text-gray-800">
                     {
                       selectedProduct.name
                     }
                   </span>
-                  ?
-                  <br />
-                  This action cannot be
-                  undone.
+                  ? This action
+                  cannot be undone.
                 </p>
-
               </div>
 
-              <div className="flex justify-end gap-3">
-
+              <div className="flex justify-end gap-3 border-t border-gray-200 bg-gray-50 px-5 py-4">
                 <button
                   type="button"
-                  onClick={
-                    closeDeleteModal
+                  disabled={deleting}
+                  onClick={() =>
+                    setShowDeleteModal(
+                      false
+                    )
                   }
-                  disabled={
-                    deleting
-                  }
-                  className="rounded-lg border border-gray-300 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
                 >
                   Cancel
                 </button>
 
                 <button
                   type="button"
+                  disabled={deleting}
                   onClick={
-                    handleDelete
+                    confirmDeleteProduct
                   }
-                  disabled={
-                    deleting
-                  }
-                  className="rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+                  className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
                 >
-                  {deleting
-                    ? "Deleting..."
-                    : "Delete Product"}
+                  {deleting && (
+                    <Loader2
+                      size={16}
+                      className="animate-spin"
+                    />
+                  )}
+
+                  Delete Product
                 </button>
-
               </div>
-
             </div>
-
           </div>
         )}
 
@@ -2777,88 +3120,168 @@ const ProductPage = () => {
       {showStatusModal &&
         selectedProduct && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
-
-            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-
-              <div className="mb-5">
-
+            <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+              <div className="p-5">
                 <div
-                  className={`mb-4 flex h-12 w-12 items-center justify-center rounded-full text-xl font-bold ${
+                  className={`mb-4 flex h-11 w-11 items-center justify-center rounded-full ${
                     selectedProduct.isActive
                       ? "bg-red-100 text-red-600"
                       : "bg-green-100 text-green-600"
                   }`}
                 >
-                  {selectedProduct.isActive
-                    ? "!"
-                    : "✓"}
+                  {selectedProduct.isActive ? (
+                    <X size={21} />
+                  ) : (
+                    <Check size={21} />
+                  )}
                 </div>
 
-                <h2 className="text-xl font-bold text-gray-800">
+                <h3 className="text-lg font-bold text-gray-900">
                   {selectedProduct.isActive
                     ? "Deactivate Product?"
                     : "Activate Product?"}
-                </h2>
+                </h3>
 
                 <p className="mt-2 text-sm leading-6 text-gray-500">
-                  Are you sure you want
-                  to{" "}
+                  Are you sure you
+                  want to{" "}
                   {selectedProduct.isActive
                     ? "deactivate"
                     : "activate"}{" "}
-                  <span className="font-semibold text-gray-700">
+                  <span className="font-semibold text-gray-800">
                     {
                       selectedProduct.name
                     }
                   </span>
                   ?
                 </p>
-
               </div>
 
-              <div className="flex justify-end gap-3">
-
+              <div className="flex justify-end gap-3 border-t border-gray-200 bg-gray-50 px-5 py-4">
                 <button
                   type="button"
-                  onClick={
-                    closeStatusModal
-                  }
                   disabled={
                     changingStatus
                   }
-                  className="rounded-lg border border-gray-300 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  onClick={() =>
+                    setShowStatusModal(
+                      false
+                    )
+                  }
+                  className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
                 >
                   Cancel
                 </button>
 
                 <button
                   type="button"
-                  onClick={
-                    handleStatusChange
-                  }
                   disabled={
                     changingStatus
                   }
-                  className={`rounded-lg px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 ${
+                  onClick={
+                    confirmChangeStatus
+                  }
+                  className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white ${
                     selectedProduct.isActive
                       ? "bg-red-600 hover:bg-red-700"
                       : "bg-green-600 hover:bg-green-700"
-                  }`}
+                  } disabled:opacity-60`}
                 >
-                  {changingStatus
-                    ? "Updating..."
-                    : selectedProduct.isActive
+                  {changingStatus && (
+                    <Loader2
+                      size={16}
+                      className="animate-spin"
+                    />
+                  )}
+
+                  {selectedProduct.isActive
                     ? "Deactivate"
                     : "Activate"}
                 </button>
-
               </div>
-
             </div>
-
           </div>
         )}
 
+      {/* ==================================================
+          DELETE IMAGE MODAL
+      ================================================== */}
+
+      {showImageDeleteModal &&
+        selectedImage && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl">
+              <div className="p-5">
+                <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-full bg-red-100 text-red-600">
+                  <Trash2 size={21} />
+                </div>
+
+                <h3 className="text-lg font-bold text-gray-900">
+                  Delete Image?
+                </h3>
+
+                <p className="mt-2 text-sm text-gray-500">
+                  This image will be
+                  permanently removed
+                  from the product.
+                </p>
+
+                <div className="mt-4 overflow-hidden rounded-lg border border-gray-200">
+                  <img
+                    src={getImageUrl(
+                      selectedImage
+                    )}
+                    alt="Delete"
+                    className="aspect-video w-full object-cover"
+                    onError={(
+                      e
+                    ) => {
+                      e.currentTarget.style.display =
+                        "none";
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 border-t border-gray-200 bg-gray-50 px-5 py-4">
+                <button
+                  type="button"
+                  disabled={
+                    imageActionLoading
+                  }
+                  onClick={() =>
+                    setShowImageDeleteModal(
+                      false
+                    )
+                  }
+                  className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  disabled={
+                    imageActionLoading
+                  }
+                  onClick={
+                    confirmDeleteImage
+                  }
+                  className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+                >
+                  {imageActionLoading && (
+                    <Loader2
+                      size={16}
+                      className="animate-spin"
+                    />
+                  )}
+
+                  Delete Image
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
     </div>
   );
 };

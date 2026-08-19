@@ -1,35 +1,5 @@
 import mongoose from "mongoose";
 
-const productImageSchema = new mongoose.Schema(
-  {
-    url: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-
-    filename: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-
-    originalName: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-
-    isPrimary: {
-      type: Boolean,
-      default: false,
-    },
-  },
-  {
-    _id: true,
-  }
-);
-
 const productSchema = new mongoose.Schema(
   {
     name: {
@@ -72,15 +42,6 @@ const productSchema = new mongoose.Schema(
       },
     ],
 
-    // =========================================
-    // PRODUCT IMAGES
-    // =========================================
-
-    images: {
-      type: [productImageSchema],
-      default: [],
-    },
-
     isActive: {
       type: Boolean,
       default: true,
@@ -91,7 +52,4 @@ const productSchema = new mongoose.Schema(
   }
 );
 
-export default mongoose.model(
-  "Product",
-  productSchema
-);
+export default mongoose.model("Product", productSchema);

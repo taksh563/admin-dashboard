@@ -274,6 +274,7 @@ const Categories = () => {
               response?.data?.message ||
               "Unable to update category.",
           });
+          
 
           return;
         }

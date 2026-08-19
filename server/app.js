@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
+import path from "path";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import auditLogRoutes from "./routes/auditLog.routes.js";
@@ -19,8 +20,14 @@ app.use(cors());
 
 app.use(express.json());
 
-app.use(helmet());
-
+// app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: {
+      policy: "cross-origin",
+    },
+  })
+);
 app.use(morgan("dev"));
 
 app.use("/api/auth", authRoutes);
@@ -32,6 +39,7 @@ app.use("/api/email/templates",emailTemplateRoutes);
 app.use("/api/categories",categoryRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/uploads",express.static(path.join(process.cwd(), "uploads")));
 app.get("/", (req, res) => {
     res.json({
         success: true,

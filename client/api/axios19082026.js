@@ -4,9 +4,11 @@ const api = axios.create({
   baseURL:
     import.meta.env.VITE_API_URL ||
     "http://localhost:5000/api",
+
+  headers: {
+    "Content-Type": "application/json",
+  },
 });
-
-
 
 // =====================================================
 // REQUEST INTERCEPTOR
@@ -14,19 +16,12 @@ const api = axios.create({
 
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("token");
+    const token =
+      localStorage.getItem("token");
 
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-
-    // IMPORTANT:
-    // Let Axios/browser automatically set multipart/form-data
-    // boundary when sending FormData.
-    if (config.data instanceof FormData) {
-      delete config.headers["Content-Type"];
-    } else {
-      config.headers["Content-Type"] = "application/json";
+      config.headers.Authorization =
+        `Bearer ${token}`;
     }
 
     return config;
@@ -47,27 +42,52 @@ api.interceptors.response.use(
   },
 
   (error) => {
-    const status = error.response?.status;
-    const code = error.response?.data?.code;
-    const requestUrl = error.config?.url || "";
+    const status =
+      error.response?.status;
 
+    const code =
+      error.response?.data?.code;
+
+    const requestUrl =
+      error.config?.url || "";
+
+    // -----------------------------------------
     // Don't handle login 401 here
-    const isLoginRequest = requestUrl.includes("/auth/login");
+    // Login page handles these messages
+    // -----------------------------------------
 
-    if (status === 401 && !isLoginRequest) {
+    const isLoginRequest =
+      requestUrl.includes(
+        "/auth/login"
+      );
+
+    if (
+      status === 401 &&
+      !isLoginRequest
+    ) {
+      // ---------------------------------------
+      // TOKEN EXPIRED
+      // ---------------------------------------
+
       if (code === "TOKEN_EXPIRED") {
         localStorage.removeItem("token");
         localStorage.removeItem("user");
 
+        // Store message temporarily
         sessionStorage.setItem(
           "sessionMessage",
           "Your session has expired. Please login again."
         );
 
-        window.location.href = "/login";
+        window.location.href =
+          "/login";
 
         return Promise.reject(error);
       }
+
+      // ---------------------------------------
+      // INVALID TOKEN
+      // ---------------------------------------
 
       if (code === "INVALID_TOKEN") {
         localStorage.removeItem("token");
@@ -78,10 +98,15 @@ api.interceptors.response.use(
           "Your session is invalid. Please login again."
         );
 
-        window.location.href = "/login";
+        window.location.href =
+          "/login";
 
         return Promise.reject(error);
       }
+
+      // ---------------------------------------
+      // USER NOT FOUND
+      // ---------------------------------------
 
       if (code === "USER_NOT_FOUND") {
         localStorage.removeItem("token");
@@ -92,10 +117,15 @@ api.interceptors.response.use(
           "Your account could not be found. Please login again."
         );
 
-        window.location.href = "/login";
+        window.location.href =
+          "/login";
 
         return Promise.reject(error);
       }
+
+      // ---------------------------------------
+      // ACCOUNT INACTIVE
+      // ---------------------------------------
 
       if (code === "ACCOUNT_INACTIVE") {
         localStorage.removeItem("token");
@@ -106,10 +136,15 @@ api.interceptors.response.use(
           "Your account is inactive. Please contact the administrator."
         );
 
-        window.location.href = "/login";
+        window.location.href =
+          "/login";
 
         return Promise.reject(error);
       }
+
+      // ---------------------------------------
+      // Generic 401
+      // ---------------------------------------
 
       localStorage.removeItem("token");
       localStorage.removeItem("user");
@@ -119,7 +154,8 @@ api.interceptors.response.use(
         "Your session has expired. Please login again."
       );
 
-      window.location.href = "/login";
+      window.location.href =
+        "/login";
     }
 
     return Promise.reject(error);
